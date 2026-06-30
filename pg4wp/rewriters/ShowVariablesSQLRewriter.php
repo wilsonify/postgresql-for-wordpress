@@ -5,7 +5,7 @@ class ShowVariablesSQLRewriter extends AbstractSQLRewriter
     public function rewrite(): string
     {
         $sql = $this->original();
-        $table = $this->extractVariableName($sql);
+        $variableName = $this->extractVariableName($sql);
         return $this->generatePostgres($sql, $variableName);
     }
 

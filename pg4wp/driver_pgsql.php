@@ -655,10 +655,6 @@ function wpsqli_stmt_bind_result($stmt, &...$vars)
  */
 function wpsqli_stmt_fetch($stmt)
 {
-    // Store the initial SQL query
-    $initial = $query;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($query);
     throw new \Exception("PG4WP: Not Yet Implemented");
     // The remaining mysqli_stmt_* functions do not have direct equivalents in PostgreSQL. Prepared statements work differently.
     // PostgreSQL uses pg_prepare() and pg_execute() for prepared statements. Results are then fetched with pg_fetch_* functions.
@@ -910,7 +906,8 @@ function wpsqli_field_count(&$connection)
 {
     // mysqli_field_count => pg_num_fields (resource $result): int
     // Use pg_num_fields to get the number of fields (columns) in a result.
-    return pg_num_fields($result);
+    $result = $GLOBALS['pg4wp_result'] ?? null;
+    return $result ? pg_num_fields($result) : 0;
 }
 
 /**

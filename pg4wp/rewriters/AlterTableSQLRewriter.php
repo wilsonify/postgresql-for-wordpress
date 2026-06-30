@@ -82,7 +82,7 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
                 $newq .= ", ALTER COLUMN $col SET DEFAULT $defval";
             }
             if($col != $newname) {
-                $newq .= ";ALTER TABLE $table RENAME COLUMN $col TO $newcol;";
+                $newq .= ";ALTER TABLE $table RENAME COLUMN $col TO $newname;";
             }
             $sql = $newq;
         }

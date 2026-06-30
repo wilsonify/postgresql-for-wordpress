@@ -15,7 +15,7 @@ class ShowIndexSQLRewriter extends AbstractSQLRewriter
      * @param string $sql The SQL statement
      * @return string|null The table name if found, or null otherwise
      */
-    protected function extractVariableName($sql)
+    protected function extractTableNameFromShowIndex($sql)
     {
         $pattern = "/SHOW INDEX FROM ['\"`]?([^'\"`]+)['\"`]?/i";
         if (preg_match($pattern, $sql, $matches)) {

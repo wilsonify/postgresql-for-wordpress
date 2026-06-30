@@ -25,8 +25,8 @@ $replaces = array(
     'instanceof mysqli_result' => 'instanceof \PgSql\Result',
     'instanceof mysqli' => 'instanceof \PgSql\Connection',
     '$this->dbh->connect_errno' => 'wpsqli_connect_error()',
+    'is_resource('	=> 'wpsqli_is_resource(',
     'mysqli_'	=> 'wpsqli_',
-    'is_resource'	=> 'wpsqli_is_resource',
     '<?php'		=> '',
     '?>'		=> '',
 );
