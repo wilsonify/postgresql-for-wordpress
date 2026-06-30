@@ -30,7 +30,7 @@ jobs:
       - name: PHP Lint
         run: |
           find pg4wp/ -name '*.php' -exec php -l {} \;
-          find rewriters/ -name '*.php' -exec php -l {} \;
+          find pg4wp/rewriters/ -name '*.php' -exec php -l {} \;
 
   sql-rewrite:
     name: SQL Rewrite PHP ${{ matrix.php }}
