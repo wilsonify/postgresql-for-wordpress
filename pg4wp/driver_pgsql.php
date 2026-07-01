@@ -6,6 +6,12 @@ include_once PG4WP_ROOT . '/driver_pgsql_rewrite.php';
 * This file implements the postgreSQL driver
 * This file remaps all wpsqli_* calls to postgres equivalents
 */
+
+// Safeguard defaults when loaded outside WordPress/db.php context
+if (!defined('PG4WP_DEBUG')) { define('PG4WP_DEBUG', false); }
+if (!defined('PG4WP_LOG_ERRORS')) { define('PG4WP_LOG_ERRORS', true); }
+if (!defined('PG4WP_LOG')) { define('PG4WP_LOG', PG4WP_ROOT . '/logs/'); }
+
 if (!extension_loaded('pgsql')) {
     wp_die('Your PHP installation appears to be missing the PostgreSQL extension which is required by WordPress with PG4WP.');
 }
@@ -807,6 +813,28 @@ function wpsqli_fetch_array($result, $mode = PGSQL_BOTH)
 function wpsqli_fetch_object($result, $class = "stdClass", $constructor_args = [])
 {
     return pg_fetch_object($result, null, $class, $constructor_args);
+}
+
+/**
+ * Fetches a result row as an associative array.
+ *
+ * This function is a wrapper for the pg_fetch_assoc function, which is used to fetch a single
+ * row of data from the result set as an associative array where the keys correspond to the
+ * column names from the query result. It returns NULL when there are no more rows to fetch.
+ *
+ * @param \PgSql\Result $result The result resource returned by a Postgres query.
+ * @return array|false An associative array of strings representing the fetched row,
+ *                     or false if there are no more rows.
+ */
+function wpsqli_fetch_assoc($result)
+{
+    $res = pg_fetch_assoc($result);
+    if (is_array($res)) {
+        foreach ($res as $k => $v) {
+            $res[$k] = trim($v);
+        }
+    }
+    return $res;
 }
 
 /**

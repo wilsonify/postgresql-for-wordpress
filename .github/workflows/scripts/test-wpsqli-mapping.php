@@ -2,6 +2,9 @@
 $root = getenv('GITHUB_WORKSPACE');
 if (!$root) { echo "FAIL: GITHUB_WORKSPACE not set\n"; exit(1); }
 define('PG4WP_ROOT', $root . '/pg4wp');
+define('PG4WP_DEBUG', false);
+define('PG4WP_LOG_ERRORS', true);
+define('PG4WP_LOG', PG4WP_ROOT . '/logs/');
 require_once PG4WP_ROOT . '/driver_pgsql.php';
 require_once PG4WP_ROOT . '/driver_pgsql_rewrite.php';
 

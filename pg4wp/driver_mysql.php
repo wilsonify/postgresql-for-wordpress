@@ -547,6 +547,22 @@ function wpsqli_stmt_errno($stmt)
 */
 
 /**
+ * Fetches a result row as an associative array.
+ *
+ * This function is a wrapper for the mysqli_fetch_assoc function, which is used to fetch a single
+ * row of data from the result set as an associative array where the keys correspond to the
+ * column names from the query result. It returns NULL when there are no more rows to fetch.
+ *
+ * @param mysqli_result $result The result resource returned by a MySQL query.
+ * @return array|null An associative array of strings representing the fetched row,
+ *                    or NULL if there are no more rows.
+ */
+function wpsqli_fetch_assoc($result)
+{
+    return mysqli_fetch_assoc($result);
+}
+
+/**
  * Fetches a result row as an associative, a numeric array, or both.
  *
  * This function is a wrapper for the mysqli_fetch_array function, which is used to fetch a single
