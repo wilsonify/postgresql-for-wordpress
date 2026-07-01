@@ -3,30 +3,30 @@
 class AlterTableSQLRewriter extends AbstractSQLRewriter
 {
     private $stringReplacements = [
-        'bigint(20)'	=> 'bigint',
-        'bigint(10)'	=> 'int',
-        'int(11)'		=> 'int',
-        'tinytext'		=> 'text',
-        'mediumtext'	=> 'text',
-        'longtext'		=> 'text',
-        'unsigned'		=> '',
-        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''	=> 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
-        'default \'0000-00-00 00:00:00\''	=> 'DEFAULT now()',
-        '\'0000-00-00 00:00:00\''	=> 'now()',
-        'datetime'		=> 'timestamp',
-        'DEFAULT CHARACTER SET utf8'	=> '',
+        'bigint(20)'    => 'bigint',
+        'bigint(10)'    => 'int',
+        'int(11)'        => 'int',
+        'tinytext'        => 'text',
+        'mediumtext'    => 'text',
+        'longtext'        => 'text',
+        'unsigned'        => '',
+        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''    => 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
+        'default \'0000-00-00 00:00:00\''    => 'DEFAULT now()',
+        '\'0000-00-00 00:00:00\''    => 'now()',
+        'datetime'        => 'timestamp',
+        'DEFAULT CHARACTER SET utf8'    => '',
 
         // WP 2.7.1 compatibility
-        'int(4)'		=> 'smallint',
+        'int(4)'        => 'smallint',
 
         // For WPMU (starting with WP 3.2)
-        'tinyint(2)'	=> 'smallint',
-        'tinyint(1)'	=> 'smallint',
-        "enum('0','1')"	=> 'smallint',
-        'COLLATE utf8_general_ci'	=> '',
+        'tinyint(2)'    => 'smallint',
+        'tinyint(1)'    => 'smallint',
+        "enum('0','1')"    => 'smallint',
+        'COLLATE utf8_general_ci'    => '',
 
         // For flash-album-gallery plugin
-        'tinyint'		=> 'smallint'
+        'tinyint'        => 'smallint'
     ];
 
     public function rewrite(): string
@@ -58,7 +58,7 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
     private function rewriteChangeColumn(string $sql): string
     {
         $pattern = '/ALTER TABLE\s+(\w+)\s+CHANGE COLUMN\s+([^\s]+)\s+([^\s]+)\s+([^ ]+)( unsigned|)\s*(NOT NULL|)\s*(default (.+)|)/';
-        
+
         if(1 === preg_match($pattern, $sql, $matches)) {
             $table = $matches[1];
             $col = $matches[2];
@@ -67,7 +67,6 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
             if(isset($this->stringReplacements[$type])) {
                 $type = $this->stringReplacements[$type];
             }
-            $unsigned = $matches[5];
             $notnull = $matches[6];
             $default = $matches[7];
             $defval = $matches[8];
@@ -117,7 +116,6 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
             if(isset($this->stringReplacements[$type])) {
                 $type = $this->stringReplacements[$type];
             }
-            $unsigned = $matches[4];
             $notnull = $matches[5];
             $default = $matches[6];
             $defval = $matches[7];
