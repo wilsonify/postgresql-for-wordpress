@@ -988,7 +988,7 @@ class wpdb {
 
 		$modes_str = implode( ',', $modes );
 
-		mysqli_query( $this->dbh, "SET SESSION sql_mode='$modes_str'" );
+		mysqli_query( $this->dbh, "SET SESSION sql_mode='" . mysqli_real_escape_string( $this->dbh, $modes_str ) . "'" );
 	}
 
 	/**
