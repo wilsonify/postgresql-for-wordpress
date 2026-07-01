@@ -11,7 +11,7 @@ if (!defined('WPINC')) {
 
 require_once __DIR__ . "/../pg4wp/db.php";
 
-final class verifyAgainstStubsTest extends TestCase
+final class VerifyAgainstStubsTest extends TestCase
 {
     const STUBS_DIRECTORY = __DIR__ . '/stubs';
 
@@ -20,7 +20,7 @@ final class verifyAgainstStubsTest extends TestCase
         $files = array_diff(scandir(self::STUBS_DIRECTORY), array('.', '..'));
         foreach($files as $file) {
             $data = json_decode(file_get_contents(self::STUBS_DIRECTORY . "/" . $file), true);
-            $this->assertSame(pg4wp_rewrite($data['mysql']), $data['postgresql']);
+            $this->assertSame($data['postgresql'], pg4wp_rewrite($data['mysql']));
         }
     }
 
