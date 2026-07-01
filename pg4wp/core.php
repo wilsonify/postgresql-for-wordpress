@@ -2,7 +2,7 @@
 /**
  * @package PostgreSQL_For_Wordpress
  * @version $Id$
- * @author	Hawk__, www.hawkix.net
+ * @author    Hawk__, www.hawkix.net
  */
 
 /**
@@ -19,16 +19,16 @@ require_once(PG4WP_ROOT . '/driver_' . DB_DRIVER . '.php');
 
 // This loads up the wpdb class applying appropriate changes to it
 $replaces = array(
-    'define( '	=> '// define( ',
-    'class wpdb'	=> 'class wpdb2',
-    'new wpdb'	=> 'new wpdb2',
+    'define( '    => '// define( ',
+    'class wpdb'    => 'class wpdb2',
+    'new wpdb'    => 'new wpdb2',
     'instanceof mysqli_result' => 'instanceof \PgSql\Result',
     'instanceof mysqli' => 'instanceof \PgSql\Connection',
     '$this->dbh->connect_errno' => 'wpsqli_connect_error()',
-    'is_resource('	=> 'wpsqli_is_resource(',
-    'mysqli_'	=> 'wpsqli_',
-    '<?php'		=> '',
-    '?>'		=> '',
+    'is_resource('    => 'wpsqli_is_resource(',
+    'mysqli_'    => 'wpsqli_',
+    '<?php'        => '',
+    '?>'        => '',
 );
 
 eval(str_replace(array_keys($replaces), array_values($replaces), file_get_contents(ABSPATH . '/wp-includes/class-wpdb.php')));
