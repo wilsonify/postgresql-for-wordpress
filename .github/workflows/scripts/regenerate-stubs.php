@@ -1,12 +1,16 @@
 <?php
+$root = getenv('REPO_ROOT');
+if (!$root) {
+    $root = dirname(__DIR__, 3);
+}
 if (!defined('ABSPATH')) {
-    define('ABSPATH', dirname(__DIR__, 2) . '/');
+    define('ABSPATH', $root . '/');
 }
 if (!defined('WPINC')) {
     define('WPINC', 'wp-includes');
 }
-$dir = dirname(__DIR__, 2) . '/tests/stubs';
-require_once dirname(__DIR__, 2) . '/pg4wp/db.php';
+$dir = $root . '/tests/stubs';
+require_once $root . '/pg4wp/db.php';
 
 $files = glob($dir . '/*.txt');
 foreach ($files as $file) {
