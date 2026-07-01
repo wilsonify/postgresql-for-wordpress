@@ -6,7 +6,7 @@ class DropTableSQLRewriter extends AbstractSQLRewriter
     {
         $sql = $this->original();
 
-        $pattern = '/DROP TABLE.+ [`]?(\w+)[`]?$/';
+        $pattern = '/DROP TABLE.+ `?(\w+)`?$/';
         preg_match($pattern, $sql, $matches);
         $table = $matches[1];
         $seq = $table . '_seq';
