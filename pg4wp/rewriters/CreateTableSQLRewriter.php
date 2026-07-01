@@ -3,34 +3,34 @@
 class CreateTableSQLRewriter extends AbstractSQLRewriter
 {
     private $stringReplacements = [
-        'bigint(20)'	=> 'bigint',
-        'bigint(10)'	=> 'int',
-        'int(11)'		=> 'int',
-        'tinytext'		=> 'text',
-        'mediumtext'	=> 'text',
-        'longtext'		=> 'text',
-        'unsigned'		=> '',
-        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''	=> 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
-        'default \'0000-00-00 00:00:00\''	=> 'DEFAULT now()',
-        '\'0000-00-00 00:00:00\''	=> 'now()',
-        'datetime'		=> 'timestamp',
+        'bigint(20)'    => 'bigint',
+        'bigint(10)'    => 'int',
+        'int(11)'        => 'int',
+        'tinytext'        => 'text',
+        'mediumtext'    => 'text',
+        'longtext'        => 'text',
+        'unsigned'        => '',
+        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''    => 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
+        'default \'0000-00-00 00:00:00\''    => 'DEFAULT now()',
+        '\'0000-00-00 00:00:00\''    => 'now()',
+        'datetime'        => 'timestamp',
         'DEFAULT CHARACTER SET utf8mb4' => '',
-        'DEFAULT CHARACTER SET utf8'	=> '',
+        'DEFAULT CHARACTER SET utf8'    => '',
 
         // WP 2.7.1 compatibility
-        'int(4)'		=> 'smallint',
+        'int(4)'        => 'smallint',
 
         // For WPMU (starting with WP 3.2)
-        'tinyint(2)'	=> 'smallint',
-        'tinyint(1)'	=> 'smallint',
-        "enum('0','1')"	=> 'smallint',
-        'COLLATE utf8mb4_unicode_520_ci'	=> '',
-        'COLLATE utf8_general_ci'	=> '',
+        'tinyint(2)'    => 'smallint',
+        'tinyint(1)'    => 'smallint',
+        "enum('0','1')"    => 'smallint',
+        'COLLATE utf8mb4_unicode_520_ci'    => '',
+        'COLLATE utf8_general_ci'    => '',
 
         // For flash-album-gallery plugin
-        'tinyint'		=> 'smallint'
+        'tinyint'        => 'smallint'
     ];
-    
+
     public function rewrite(): string
     {
         $sql = $this->original();
