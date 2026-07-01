@@ -28,9 +28,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
       - name: PHP Lint
-        run: |
-          find pg4wp/ -name '*.php' -exec php -l {} \;
-          find pg4wp/rewriters/ -name '*.php' -exec php -l {} \;
+        run: bash .github/workflows/scripts/ci-lint.sh
 
   sql-rewrite:
     name: Rewrite PHP ${{ matrix.php }}
@@ -78,36 +76,11 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: pgsql
       - name: Wait for PostgreSQL
-        run: |
-          for i in $(seq 1 30); do
-            pg_isready -h localhost -U pg4wp && break
-            sleep 2
-          done
+        run: bash .github/workflows/scripts/wait-for-pg.sh
       - name: Connection Test
-        run: |
-          php -r "
-            \$conn = @pg_connect(getenv('PG4WP_TEST_DSN'));
-            if (!\$conn) { echo 'FAIL: PG connection'; exit(1); }
-            echo 'OK: PG ' . pg_version(\$conn)['server'] . chr(10);
-            pg_close(\$conn);
-          "
+        run: php .github/workflows/scripts/test-pg-connection.php
       - name: wpsqli Function Mapping Test
-        run: |
-          php -r "
-            define('PG4WP_ROOT', getenv('GITHUB_WORKSPACE') . '/pg4wp');
-            require_once PG4WP_ROOT . '/driver_pgsql.php';
-            require_once PG4WP_ROOT . '/driver_pgsql_rewrite.php';
-            \$conn = @pg_connect(getenv('PG4WP_TEST_DSN'));
-            if (!\$conn) { echo 'FAIL: connection'; exit(1); }
-            \$r = wpsqli_query(\$conn, 'SELECT 1 AS test');
-            if (\$r === false) { echo 'FAIL: wpsqli_query'; exit(1); }
-            \$row = wpsqli_fetch_assoc(\$r);
-            if (\$row['test'] !== '1') { echo 'FAIL: fetch_assoc'; exit(1); }
-            echo 'OK: wpsqli_query + fetch_assoc' . chr(10);
-            wpsqli_free_result(\$r);
-            pg_close(\$conn);
-            echo 'ALL PG INTEGRATION TESTS PASSED' . chr(10);
-          "
+        run: php .github/workflows/scripts/test-wpsqli-mapping.php
 
   wordpress-install:
     name: WP ${{ matrix.wp }} / PHP ${{ matrix.php }} / PG16
@@ -140,40 +113,10 @@ jobs:
           extensions: pgsql
           tools: wp-cli
       - name: Wait for PostgreSQL
-        run: |
-          for i in $(seq 1 30); do
-            pg_isready -h localhost -U pg4wp && break
-            sleep 2
-          done
+        run: bash .github/workflows/scripts/wait-for-pg.sh
       - name: Install WordPress ${{ matrix.wp }} (allow failure)
         continue-on-error: true
-        run: |
-          WP_VERSION="${{ matrix.wp }}"
-          [ "$WP_VERSION" = "latest" ] && WP_VERSION=""
-          wp core download --version=$WP_VERSION --path=/tmp/wordpress --allow-root
-          cp -r "$GITHUB_WORKSPACE" /tmp/wordpress/wp-content/plugins/pg4wp
-          cd /tmp/wordpress
-          wp config create \
-            --dbname=wordpress \
-            --dbuser=pg4wp \
-            --dbpass=pg4wp \
-            --dbhost=localhost \
-            --allow-root
-          echo "define('WP_DEBUG', true);" >> wp-config.php
-          echo "define('WP_DEBUG_LOG', true);" >> wp-config.php
-          cp wp-content/plugins/pg4wp/db.php wp-content/db.php
-          mkdir -p wp-content/pg4wp/logs
-          wp core install \
-            --url=http://localhost:8080 \
-            --title="PG4WP Test" \
-            --admin_user=admin \
-            --admin_password=admin \
-            --admin_email=test@example.com \
-            --allow-root 2>&1 || true
-          echo "--- PG4WP Error Log ---"
-          cat wp-content/pg4wp/logs/pg4wp_errors.log 2>/dev/null || echo "No PG4WP error log found"
-          echo "--- PHP Error Log ---"
-          tail -50 wp-content/debug.log 2>/dev/null || echo "No debug log found"
+        run: bash .github/workflows/scripts/install-wordpress.sh ${{ matrix.wp }}
 
   woocommerce-install:
     name: WC ${{ matrix.wc }} + WP ${{ matrix.wp }} / PG16 / PHP 8.2
@@ -206,51 +149,10 @@ jobs:
           extensions: pgsql
           tools: wp-cli
       - name: Wait for PostgreSQL
-        run: |
-          for i in $(seq 1 30); do
-            pg_isready -h localhost -U pg4wp && break
-            sleep 2
-          done
+        run: bash .github/workflows/scripts/wait-for-pg.sh
       - name: Install WordPress ${{ matrix.wp }} (allow failure)
         continue-on-error: true
-        run: |
-          WP_VERSION="${{ matrix.wp }}"
-          [ "$WP_VERSION" = "latest" ] && WP_VERSION=""
-          wp core download --version=$WP_VERSION --path=/tmp/wordpress --allow-root
-          cp -r "$GITHUB_WORKSPACE" /tmp/wordpress/wp-content/plugins/pg4wp
-          cd /tmp/wordpress
-          wp config create \
-            --dbname=wordpress \
-            --dbuser=pg4wp \
-            --dbpass=pg4wp \
-            --dbhost=localhost \
-            --allow-root
-          echo "define('WP_DEBUG', true);" >> wp-config.php
-          echo "define('WP_DEBUG_LOG', true);" >> wp-config.php
-          cp wp-content/plugins/pg4wp/db.php wp-content/db.php
-          mkdir -p wp-content/pg4wp/logs
-          wp core install \
-            --url=http://localhost:8080 \
-            --title="PG4WP WC Test" \
-            --admin_user=admin \
-            --admin_password=admin \
-            --admin_email=test@example.com \
-            --allow-root 2>&1 || true
-          echo "--- PG4WP Error Log ---"
-          cat wp-content/pg4wp/logs/pg4wp_errors.log 2>/dev/null || echo "No PG4WP error log found"
+        run: bash .github/workflows/scripts/install-wordpress.sh ${{ matrix.wp }}
       - name: Install WooCommerce ${{ matrix.wc }} (if WP installed)
         continue-on-error: true
-        run: |
-          cd /tmp/wordpress
-          WC_VERSION="${{ matrix.wc }}"
-          [ "$WC_VERSION" = "latest" ] && WC_VERSION=""
-          if wp core is-installed --allow-root 2>/dev/null; then
-            if [ -n "$WC_VERSION" ]; then
-              wp plugin install woocommerce --version=$WC_VERSION --activate --allow-root
-            else
-              wp plugin install woocommerce --activate --allow-root
-            fi
-            wp plugin list --allow-root
-          else
-            echo "WordPress not installed — skipping WooCommerce"
-          fi
+        run: bash .github/workflows/scripts/install-woocommerce.sh ${{ matrix.wc }}
