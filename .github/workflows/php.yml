@@ -92,15 +92,11 @@ jobs:
             pg_close(\$conn);
           "
       - name: wpsqli Function Mapping Test
-        env:
-          DB_NAME: pg4wp_test
-          DB_USER: pg4wp
-          DB_PASSWORD: pg4wp
-          DB_HOST: localhost
         run: |
           php -r "
-            require_once 'pg4wp/driver_pgsql.php';
-            require_once 'pg4wp/driver_pgsql_rewrite.php';
+            define('PG4WP_ROOT', getenv('GITHUB_WORKSPACE') . '/pg4wp');
+            require_once PG4WP_ROOT . '/driver_pgsql.php';
+            require_once PG4WP_ROOT . '/driver_pgsql_rewrite.php';
             \$conn = @pg_connect(getenv('PG4WP_TEST_DSN'));
             if (!\$conn) { echo 'FAIL: connection'; exit(1); }
             \$r = wpsqli_query(\$conn, 'SELECT 1 AS test');
