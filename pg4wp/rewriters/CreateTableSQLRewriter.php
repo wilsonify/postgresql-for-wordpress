@@ -6,9 +6,14 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
         'bigint(20)'    => 'bigint',
         'bigint(10)'    => 'int',
         'int(11)'        => 'int',
+        'int(10)'        => 'int',
         'tinytext'        => 'text',
         'mediumtext'    => 'text',
         'longtext'        => 'text',
+        'mediumblob'    => 'bytea',
+        'longblob'        => 'bytea',
+        'blob'            => 'bytea',
+        'tinyblob'        => 'bytea',
         'unsigned'        => '',
         'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''    => 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
         'default \'0000-00-00 00:00:00\''    => 'DEFAULT now()',
@@ -21,6 +26,7 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
         'int(4)'        => 'smallint',
 
         // For WPMU (starting with WP 3.2)
+        'tinyint(4)'    => 'smallint',
         'tinyint(2)'    => 'smallint',
         'tinyint(1)'    => 'smallint',
         "enum('0','1')"    => 'smallint',
@@ -28,13 +34,20 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
         'COLLATE utf8_general_ci'    => '',
 
         // For flash-album-gallery plugin
-        'tinyint'        => 'smallint'
+        'tinyint'        => 'smallint',
+
+        // MySQL-only types
+        'year(4)'        => 'smallint',
+        'year'            => 'smallint',
+        'bool'            => 'boolean',
+        'boolean'        => 'boolean',
+        'float'            => 'double precision',
+        'double'        => 'double precision',
     ];
 
     public function rewrite(): string
     {
         $sql = $this->original();
-
 
         $sql = str_replace('CREATE TABLE IF NOT EXISTS ', 'CREATE TABLE ', $sql);
         $pattern = '/CREATE TABLE [`]?(\w+)[`]?/';
@@ -50,6 +63,10 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
             array_values($this->stringReplacements),
             $sql
         );
+
+        // Convert varbinary(N) and binary(N) to bytea
+        $sql = preg_replace('/\bvarbinary\s*\(\s*\d+\s*\)/i', 'bytea', $sql);
+        $sql = preg_replace('/\bbinary\s*\(\s*\d+\s*\)/i', 'bytea', $sql);
 
         // Fix auto_increment by adding a sequence
         $pattern = '/int[ ]+NOT NULL auto_increment/';

@@ -777,6 +777,9 @@ function wpsqli_stmt_errno($stmt)
  */
 function wpsqli_fetch_array($result, $mode = PGSQL_BOTH)
 {
+    if ($result === false) {
+        return false;
+    }
     // Fetch the next row as an array
     $res = pg_fetch_array($result, null, $mode);
 
@@ -812,6 +815,9 @@ function wpsqli_fetch_array($result, $mode = PGSQL_BOTH)
  */
 function wpsqli_fetch_object($result, $class = "stdClass", $constructor_args = [])
 {
+    if ($result === false) {
+        return false;
+    }
     return pg_fetch_object($result, null, $class, $constructor_args);
 }
 
@@ -828,6 +834,9 @@ function wpsqli_fetch_object($result, $class = "stdClass", $constructor_args = [
  */
 function wpsqli_fetch_assoc($result)
 {
+    if ($result === false) {
+        return false;
+    }
     $res = pg_fetch_assoc($result);
     if (is_array($res)) {
         foreach ($res as $k => $v) {
@@ -854,6 +863,9 @@ function wpsqli_fetch_assoc($result)
  */
 function wpsqli_fetch_row($result): ?array
 {
+    if ($result === false) {
+        return null;
+    }
     return pg_fetch_row($result);
 }
 
@@ -875,6 +887,9 @@ function wpsqli_fetch_row($result): ?array
  */
 function wpsqli_data_seek($result, int $row_number): bool
 {
+    if ($result === false) {
+        return false;
+    }
     return pg_result_seek($result, $row_number);
 }
 
@@ -914,6 +929,9 @@ function wpsqli_fetch_field($result)
  */
 function wpsqli_num_fields($result)
 {
+    if ($result === false) {
+        return 0;
+    }
     // mysqli_num_fields => pg_num_fields (resource $result): int
     // Returns the number of fields (columns) in a result.
     return pg_num_fields($result);
@@ -994,6 +1012,9 @@ function wpsqli_use_result(&$connection)
  */
 function wpsqli_free_result($result)
 {
+    if ($result === false) {
+        return;
+    }
     // mysqli_free_result => pg_free_result (resource $result): bool
     // Frees memory associated with a result.
     pg_free_result($result);

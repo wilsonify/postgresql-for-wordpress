@@ -12,6 +12,10 @@ spl_autoload_register(function ($className) {
 function createSQLRewriter(string $sql): AbstractSQLRewriter
 {
     $sql = trim($sql);
+    // Handle MySQL DO statements (used for check_connection)
+    if (preg_match('/^DO\b/i', $sql)) {
+        return new SelectSQLRewriter(preg_replace('/^DO\b/i', 'SELECT', $sql));
+    }
     if (preg_match('/^(SELECT|INSERT|UPDATE|DELETE|DESCRIBE|ALTER TABLE|CREATE TABLE|DROP TABLE|SHOW INDEX|SHOW VARIABLES|SHOW TABLES|OPTIMIZE TABLE|SET NAMES|SHOW FULL COLUMNS)\b/i', $sql, $matches)) {
         // Convert to a format suitable for class names (e.g., "SHOW TABLES" becomes "ShowTables")
         $type = str_replace(' ', '', ucwords(str_replace('_', ' ', strtolower($matches[1]))));
@@ -43,6 +47,8 @@ function pg4wp_rewrite($sql)
     switch ($rewriter->type()) {
         case 'Update':
             // This will avoid modifications to anything following ' SET '
+            // Normalize whitespace before SET to handle newlines
+            $sql = preg_replace('/\s+SET\s+/i', ' SET ', $sql, 1);
             list($sql, $end) = explode(' SET ', $sql, 2);
             $end = ' SET ' . $end;
             break;
