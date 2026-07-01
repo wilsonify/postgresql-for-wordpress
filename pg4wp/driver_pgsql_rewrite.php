@@ -70,7 +70,7 @@ function pg4wp_rewrite($sql)
 
     // For insert ID caching
     if($logto == 'INSERT') {
-        $pattern = '/INSERT INTO "?([\w_]+)"? \(([^)]+)\)/i';
+        $pattern = '/INSERT INTO "?(\w+)"? \(([^)]+)\)/i';
         preg_match($pattern, $sql, $matches);
 
         if (isset($matches[1])) {
