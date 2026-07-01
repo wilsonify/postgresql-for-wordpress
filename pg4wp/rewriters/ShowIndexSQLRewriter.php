@@ -32,11 +32,11 @@ class ShowIndexSQLRewriter extends AbstractSQLRewriter
      */
     public function generatePostgresShowIndexFrom($tableName)
     {
-        $sql = <<<SQL
+        return <<<SQL
         SELECT bc.relname AS "Table",
             CASE WHEN i.indisunique THEN '0' ELSE '1' END AS "Non_unique",
             CASE WHEN i.indisprimary THEN 'PRIMARY' WHEN bc.relname LIKE '%usermeta' AND ic.relname = 'umeta_key'
-                THEN 'meta_key' ELSE REPLACE( ic.relname, '' . $table . '_', '') END AS "Key_name",
+                THEN 'meta_key' ELSE REPLACE( ic.relname, '' . $tableName . '_', '') END AS "Key_name",
             a.attname AS "Column_name",
             NULL AS "Sub_part"
         FROM pg_class bc, pg_class ic, pg_index i, pg_attribute a
@@ -56,7 +56,5 @@ class ShowIndexSQLRewriter extends AbstractSQLRewriter
                 WHEN i.indkey[7] THEN 7
             END
         SQL;
-
-        return $sql;
     }
 }
