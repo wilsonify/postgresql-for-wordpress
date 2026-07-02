@@ -1,0 +1,48 @@
+sequenceDiagram
+    participant Client as Web Client
+    participant WP as WordPress Bootstrap
+    participant db as db.php Drop-in
+    participant core as core.php
+    participant driver as driver_pgsql.php
+    participant rewrite as pg4wp_rewrite()
+    participant pgsql as PHP pgsql
+    participant PG as PostgreSQL
+
+    Client->>WP: HTTP Request (index.php)
+    WP->>WP: Load wp-config.php
+    WP->>WP: Define DB_* + DB_DRIVER constants
+    WP->>db: Load wp-content/db.php
+    db->>core: require core.php
+    
+    Note over core: Load pinned WP prereqs
+    
+    core->>driver: require driver_pgsql.php
+    
+    core->>core: Read class-wpdb.php
+    core->>core: Apply string replacements
+    
+    core->>core: eval(patched source)
+    
+    core->>driver: new wpdb2(DB_USER, DB_PASS, DB_NAME, DB_HOST)
+    driver->>rewrite: pg4wp_rewrite("")
+    driver->>pgsql: pg_connect()
+    pgsql->>PG: TCP Connection
+    PG-->>pgsql: Connected
+    pgsql-->>driver: \PgSql\Connection
+    
+    driver-->>core: $wpdb instance
+    
+    WP->>WP: Load Plugins
+    WP->>WP: Load Theme
+    
+    WP->>driver: wpsqli_query($dbh, "SELECT *")
+    driver->>rewrite: pg4wp_rewrite("SELECT *")
+    rewrite->>rewrite: createSQLRewriter()
+    rewrite->>rewrite: rewriter->rewrite()
+    rewrite-->>driver: Rewritten SQL
+    driver->>pgsql: pg_query($dbh, $rewrittenSQL)
+    pgsql->>PG: PostgreSQL Query
+    PG-->>pgsql: Result
+    pgsql-->>driver: \PgSql\Result
+    driver-->>WP: Results
+    WP-->>Client: HTML Response

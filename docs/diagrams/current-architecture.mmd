@@ -1,0 +1,44 @@
+graph TB
+    subgraph "Web Server Layer"
+        HTTP[HTTP Request]
+        WP[WordPress Index]
+    end
+
+    subgraph "WordPress Core"
+        wpdb["wpdb Class<br/>wp-includes/class-wpdb.php"]
+        WPDB_QUERY["wpdb::query()"]
+        WPDB_GET["wpdb::get_results()"]
+        WPDB_INSERT["wpdb::insert()"]
+        WPDB_UPDATE["wpdb::update()"]
+        WPDB_DELETE["wpdb::delete()"]
+    end
+
+    subgraph "MySQL Driver"
+        MYSQLI["PHP MySQLi Extension"]
+        MYSQLI_QUERY["mysqli_query()"]
+        MYSQLI_FETCH["mysqli_fetch_assoc()"]
+        MYSQLI_CONN["mysqli_real_connect()"]
+    end
+
+    subgraph "Database Server"
+        MYSQL["MariaDB / MySQL Server"]
+        MY_SCHEMA["WordPress Schema<br/>wp_posts, wp_options,<br/>wp_usermeta, ..."]
+    end
+
+    HTTP --> WP
+    WP --> wpdb
+    wpdb --> WPDB_QUERY
+    wpdb --> WPDB_GET
+    wpdb --> WPDB_INSERT
+    wpdb --> WPDB_UPDATE
+    wpdb --> WPDB_DELETE
+    WPDB_QUERY --> MYSQLI_QUERY
+    WPDB_GET --> MYSQLI_QUERY
+    WPDB_INSERT --> MYSQLI_QUERY
+    WPDB_UPDATE --> MYSQLI_QUERY
+    WPDB_DELETE --> MYSQLI_QUERY
+    MYSQLI_QUERY --> MYSQLI
+    MYSQLI_FETCH --> MYSQLI
+    MYSQLI_CONN --> MYSQLI
+    MYSQLI --> MYSQL
+    MYSQL --> MY_SCHEMA

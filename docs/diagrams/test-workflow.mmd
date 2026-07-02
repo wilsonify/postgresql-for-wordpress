@@ -1,0 +1,21 @@
+graph LR
+    A[Write Test Stub] --> B{Run Suite}
+    B -->|Fails| C[Implement Fix]
+    C --> D{Run Suite}
+    D -->|Fails| C
+    D -->|Passes| E{Run All Stubs}
+    E -->|Regression| C
+    E -->|All Pass| F[Commit]
+    F --> G[CI Pipeline]
+    G -->|Lint| H[PHP Lint]
+    G -->|SQL Rewrite| I[Stub Tests]
+    G -->|PG Integration| J[Live PG Tests]
+    G -->|WP Install| K[WordPress Tests]
+    G -->|WC Install| L[WooCommerce Tests]
+    H --> M{Quality Gate}
+    I --> M
+    J --> M
+    K --> M
+    L --> M
+    M -->|Pass| N[Release]
+    M -->|Fail| C

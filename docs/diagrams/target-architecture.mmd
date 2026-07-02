@@ -1,0 +1,41 @@
+graph TB
+    subgraph "Web Server Layer"
+        HTTP[HTTP Request]
+        WP[WordPress Index]
+    end
+
+    subgraph "WordPress Core (Unmodified)"
+        wpdb["wpdb Class<br/>wp-includes/class-wpdb.php"]
+    end
+
+    subgraph "PG4WP Compatibility Layer"
+        DB_PHP["db.php<br/>wp-content/db.php"]
+        CORE_PHP["core.php<br/>eval-based wpdb patching"]
+        DRIVER_PG["driver_pgsql.php<br/>wpsqli_* functions"]
+        REWRITE_ENG["pg4wp_rewrite()<br/>SQL Translation"]
+        REWRITERS["Rewriters/<br/>15 Statement Classes"]
+    end
+
+    subgraph "PHP PostgreSQL Driver"
+        PG_PHP["PHP pgsql Extension"]
+    end
+
+    subgraph "Database Server"
+        PG["PostgreSQL Server"]
+        PG_SCHEMA["WordPress Schema<br/>wp_posts, wp_options,<br/>wp_usermeta, ..."]
+    end
+
+    HTTP --> WP
+    WP --> wpdb
+    wpdb -->|"eval-patched mysqli_ -> wpsqli_"| DB_PHP
+    DB_PHP --> CORE_PHP
+    CORE_PHP -->|"Eval'd class wpdb2"| wpdb
+    wpdb -->|"wpsqli_query()"| DRIVER_PG
+    DRIVER_PG -->|"pg4wp_rewrite($sql)"| REWRITE_ENG
+    REWRITE_ENG -->|"createSQLRewriter()"| REWRITERS
+    REWRITERS -->|"rewritten SQL"| REWRITE_ENG
+    REWRITE_ENG -->|"Post-processing"| REWRITE_ENG
+    REWRITE_ENG -->|"rewritten SQL"| DRIVER_PG
+    DRIVER_PG -->|"pg_query()"| PG_PHP
+    PG_PHP --> PG
+    PG --> PG_SCHEMA

@@ -1,0 +1,25 @@
+graph LR
+    WP_CONFIG[wp-config.php] --> DB_HOST[DB_HOST: localhost]
+    WP_CONFIG --> DB_NAME[DB_NAME: wordpress]
+    WP_CONFIG --> DB_USER[DB_USER: wp_user]
+    WP_CONFIG --> DB_PASS[DB_PASS: ***]
+    WP_CONFIG --> DB_CHARSET[DB_CHARSET: utf8]
+    WP_CONFIG --> DB_COLLATE[DB_COLLATE: en_US.UTF-8]
+    WP_CONFIG --> TABLE_PREFIX[table_prefix: wp_]
+    WP_CONFIG --> DB_DRIVER[DB_DRIVER: pgsql]
+    WP_CONFIG --> PG4WP_DEBUG[PG4WP_DEBUG: false]
+    WP_CONFIG --> PG4WP_LOG[PG4WP_LOG_ERRORS: false]
+
+    DB_DRIVER -->|pgsql| CORE[core.php]
+    DB_HOST --> CORE
+    DB_NAME --> CORE
+    DB_USER --> CORE
+    DB_PASS --> CORE
+    DB_CHARSET --> DRIVER[driver_pgsql.php]
+    DB_COLLATE --> DRIVER
+    TABLE_PREFIX --> wpdb2[wpdb2]
+    PG4WP_DEBUG --> DRIVER
+    PG4WP_LOG --> DRIVER
+
+    DRIVER --> PG_CONNECT["pg_connect()"]
+    PG_CONNECT --> PG_STRING["Connection String"]

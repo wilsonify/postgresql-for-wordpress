@@ -1,0 +1,25 @@
+stateDiagram-v2
+    [*] --> MySQL_Existing: Before Migration
+    MySQL_Existing --> Pg_Schema_Export: pgloader Schema
+    Pg_Schema_Export --> Pg_Data_Migration: pgloader Data
+    
+    state Pg_Data_Migration {
+        [*] --> Type_Conversion
+        Type_Conversion --> Sequence_Creation
+        Sequence_Creation --> Index_Creation
+        Index_Creation --> Validation
+        Validation --> [*]
+    }
+    
+    Pg_Data_Migration --> Pg_Active: Switch DB_DRIVER
+    
+    state Pg_Active {
+        Plugin_Install: Plugin creates tables
+        Core_Upgrade: Core upgrade alters tables
+        Daily_Ops: Daily CRUD operations
+    }
+    
+    Pg_Active --> Pg_Schema_Update: Plugin/Theme adds tables
+    Pg_Active --> Pg_Backup: Daily backup
+    Pg_Backup --> Pg_Active: Restore if needed
+    Pg_Active --> [*]: Rollback to MySQL

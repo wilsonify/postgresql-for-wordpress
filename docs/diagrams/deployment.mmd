@@ -1,0 +1,27 @@
+graph TB
+    subgraph "Web Server (Single or Pool)"
+        FS[File System]
+        WP_FILES[WordPress Files]
+        PG4WP_FILES["PG4WP Files<br/>wp-content/db.php<br/>wp-content/pg4wp/"]
+        PHP["PHP 8.1-8.4"]
+        PHP_EXT["PHP pgsql Extension"]
+    end
+
+    subgraph "Database Server"
+        PG["PostgreSQL 14-17"]
+        WP_DB[("WordPress Database")]
+        PG_EXT["Extensions:<br/>pgcrypto (if needed)"]
+    end
+
+    subgraph "Optional Admin Tools"
+        PGADMIN["pgAdmin / DBeaver"]
+        PGLOADER["pgloader<br/>Migration Tool"]
+        WPCLI["WP-CLI"]
+    end
+
+    PHP_EXT -->|"pg_connect()"| PG
+    PG4WP_FILES --> PHP
+    WP_FILES --> PHP
+    PGLOADER -->|Migration| PG
+    PGADMIN -->|Management| PG
+    WPCLI --> PHP

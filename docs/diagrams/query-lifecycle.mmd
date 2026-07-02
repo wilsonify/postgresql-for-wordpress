@@ -1,0 +1,45 @@
+sequenceDiagram
+    participant User as WordPress Code
+    participant wpdb2 as wpdb2 (Eval'd)
+    participant driver as driver_pgsql.php
+    participant rewrite as pg4wp_rewrite()
+    participant rewriter as SelectSQLRewriter
+    participant pgsql as PHP pgsql
+    participant PG as PostgreSQL
+
+    User->>wpdb2: $wpdb->get_results("SELECT * FROM wp_posts WHERE ID = 1")
+    
+    wpdb2->>driver: wpsqli_query($dbh, "SELECT * FROM wp_posts WHERE ID = 1")
+    
+    driver->>driver: $GLOBALS['pg4wp_result'] = null
+    driver->>rewrite: pg4wp_rewrite("SELECT * FROM wp_posts WHERE ID = 1")
+    
+    Note over rewrite: 1. Normalize whitespace
+    Note over rewrite: 2. Detect statement type
+    rewrite->>rewriter: new SelectSQLRewriter(sql)
+    
+    Note over rewriter: 3. Type-specific transforms
+    Note over rewriter: - Quote "ID" identifier
+    Note over rewriter: - Convert LIKE to ILIKE
+    Note over rewriter: - Handle LIMIT syntax
+    
+    rewriter->>rewriter: rewriter->rewrite()
+    rewriter-->>rewrite: Partially rewritten SQL
+    
+    Note over rewrite: 4. Post-processing transforms
+    
+    rewrite-->>driver: "SELECT * FROM wp_posts WHERE \"ID\" = 1"
+    
+    driver->>pgsql: pg_query($dbh, $rewrittenSQL)
+    pgsql->>PG: SELECT * FROM wp_posts WHERE "ID" = 1
+    PG-->>pgsql: \PgSql\Result
+    pgsql-->>driver: Result
+    
+    driver->>driver: $GLOBALS['pg4wp_result'] = $result
+    
+    wpdb2->>driver: wpsqli_fetch_assoc($result)
+    driver->>pgsql: pg_fetch_assoc($result)
+    pgsql-->>driver: Associative Array
+    driver-->>wpdb2: PHP Array
+    
+    wpdb2-->>User: WP_Post Object
