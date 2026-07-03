@@ -8,29 +8,8 @@ class SelectSQLRewriter extends AbstractSQLRewriter
 
         $sql = $this->original();
 
-        // SQL_CALC_FOUND_ROWS doesn't exist in PostgreSQL but it's needed for correct paging
-        if(false !== strpos($sql, 'SQL_CALC_FOUND_ROWS')) {
-            $sql = str_replace('SQL_CALC_FOUND_ROWS', '', $sql);
-            $GLOBALS['pg4wp_numrows_query'] = $sql;
-            if(PG4WP_DEBUG) {
-                error_log('[' . microtime(true) . "] Number of rows required for :\n$sql\n---------------------\n", 3, PG4WP_LOG . 'pg4wp_NUMROWS.log');
-            }
-        }
-
-        if(false !== strpos($sql, 'FOUND_ROWS()')) {
-            // Here we convert the latest query into a COUNT query
-            $sql = $GLOBALS['pg4wp_numrows_query'];
-
-            // Remove the LIMIT clause if it exists
-            $sql = preg_replace('/\s+LIMIT\s+\d+(\s*,\s*\d+)?/i', '', $sql);
-
-            // Remove the ORDER BY clause if it exists
-            $sql = preg_replace('/\s+ORDER\s+BY\s+[^)]+/i', '', $sql);
-
-            // Replace the fields in the SELECT clause with COUNT(*)
-            $sql = preg_replace('/SELECT\s+.*?\s+FROM\s+/is', 'SELECT COUNT(*) FROM ', $sql, 1);
-        }
-
+        $sql = $this->handleCalcFoundRows($sql);
+        $sql = $this->handleFoundRows($sql);
         $sql = $this->ensureOrderByInSelect($sql);
 
         // Convert CONVERT to CAST
@@ -94,15 +73,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
             $sql = str_replace(' comment_id ', ' comment_ID ', $sql);
         }
 
-        // MySQL treats a HAVING clause without GROUP BY like WHERE
-        if(false !== strpos($sql, 'HAVING') && false === strpos($sql, 'GROUP BY')) {
-            if(false === strpos($sql, 'WHERE')) {
-                $sql = str_replace('HAVING', 'WHERE', $sql);
-            } else {
-                $pattern = '/WHERE\s+(.*?)\s+HAVING\s+(.*?)(\s*(?:ORDER|LIMIT|PROCEDURE|INTO|FOR|LOCK|$))/';
-                $sql = preg_replace($pattern, 'WHERE ($1) AND ($2) $3', $sql);
-            }
-        }
+        $sql = $this->handleHavingWithoutGroupBy($sql);
 
         // MySQL allows integers to be used as boolean expressions
         // where 0 is false and all other values are true.
@@ -125,6 +96,43 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = preg_replace($pattern, ') AS "$1"', $sql);
 
         return $sql;
+    }
+
+    protected function handleCalcFoundRows(string $sql): string
+    {
+        if (false === strpos($sql, 'SQL_CALC_FOUND_ROWS')) {
+            return $sql;
+        }
+        $sql = str_replace('SQL_CALC_FOUND_ROWS', '', $sql);
+        $GLOBALS['pg4wp_numrows_query'] = $sql;
+        if (PG4WP_DEBUG) {
+            error_log('[' . microtime(true) . "] Number of rows required for :\n$sql\n---------------------\n", 3, PG4WP_LOG . 'pg4wp_NUMROWS.log');
+        }
+        return $sql;
+    }
+
+    protected function handleFoundRows(string $sql): string
+    {
+        if (false === strpos($sql, 'FOUND_ROWS()')) {
+            return $sql;
+        }
+        $sql = $GLOBALS['pg4wp_numrows_query'];
+        $sql = preg_replace('/\s+LIMIT\s+\d+(\s*,\s*\d+)?/i', '', $sql);
+        $sql = preg_replace('/\s+ORDER\s+BY\s+[^)]+/i', '', $sql);
+        $sql = preg_replace('/SELECT\s+.*?\s+FROM\s+/is', 'SELECT COUNT(*) FROM ', $sql, 1);
+        return $sql;
+    }
+
+    protected function handleHavingWithoutGroupBy(string $sql): string
+    {
+        if (false === strpos($sql, 'HAVING') || false !== strpos($sql, 'GROUP BY')) {
+            return $sql;
+        }
+        if (false === strpos($sql, 'WHERE')) {
+            return str_replace('HAVING', 'WHERE', $sql);
+        }
+        $pattern = '/WHERE\s+(.*?)\s+HAVING\s+(.*?)(\s*(?:ORDER|LIMIT|PROCEDURE|INTO|FOR|LOCK|$))/';
+        return preg_replace($pattern, 'WHERE ($1) AND ($2) $3', $sql);
     }
 
     /**
@@ -153,49 +161,61 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $selectClause = trim($selectMatches[1]);
         $orderByClause = $orderMatches ? trim($orderMatches[1]) : null;
         $groupClause = $groupMatches ? trim($groupMatches[1]) : null;
-        $modified = false;
 
         // Check for wildcard in SELECT
         if (strpos($selectClause, '*') !== false) {
             return $sql; // Cannot handle wildcards, return original query
         }
 
-        // Handle ORDER BY columns
-        if ($orderByClause) {
-            $orderByColumns = explode(',', $orderByClause);
-            foreach ($orderByColumns as $col) {
-                $col = trim($col);
-                if (strpos($selectClause, $col) === false) {
-                    $selectClause .= ', ' . $col;
-                    $modified = true;
-                }
-            }
+        $clause = $this->ensureOrderByColumnsInSelect($selectClause, $orderByClause);
+        if ($clause === $selectClause) {
+            $clause = $this->ensureGroupByColumnsInSelect($selectClause, $groupClause);
         }
-
-        // Handle GROUP BY columns
-        if ($groupClause && !$modified) {
-            $groupColumns = explode(',', $groupClause);
-            foreach ($groupColumns as $col) {
-                $col = trim($col);
-                if (strpos($selectClause, $col) === false) {
-                    $selectClause .= ', ' . $col;
-                    $modified = true;
-                }
-            }
-        }
-
-        if (!$modified) {
+        if ($clause === $selectClause) {
             return $sql;
         }
+        return $this->replaceSelectClause($sql, $selectMatches[1], $clause);
+    }
 
-        // Find the exact position for the replacement
-        $selectStartPos = strpos($sql, $selectMatches[1]);
-        if ($selectStartPos === false) {
-            return $sql; // If for some reason the exact match is not found, return the original query
+    private function ensureOrderByColumnsInSelect(string $selectClause, ?string $orderByClause): string
+    {
+        if (!$orderByClause) {
+            return $selectClause;
         }
-        $postgresSql = substr_replace($sql, $selectClause, $selectStartPos, strlen($selectMatches[1]));
+        $clause = $selectClause;
+        $columns = explode(',', $orderByClause);
+        foreach ($columns as $col) {
+            $col = trim($col);
+            if (strpos($clause, $col) === false) {
+                $clause .= ', ' . $col;
+            }
+        }
+        return $clause;
+    }
 
-        return $postgresSql;
+    private function ensureGroupByColumnsInSelect(string $selectClause, ?string $groupClause): string
+    {
+        if (!$groupClause) {
+            return $selectClause;
+        }
+        $clause = $selectClause;
+        $columns = explode(',', $groupClause);
+        foreach ($columns as $col) {
+            $col = trim($col);
+            if (strpos($clause, $col) === false) {
+                $clause .= ', ' . $col;
+            }
+        }
+        return $clause;
+    }
+
+    private function replaceSelectClause(string $sql, string $originalClause, string $newClause): string
+    {
+        $pos = strpos($sql, $originalClause);
+        if ($pos === false) {
+            return $sql;
+        }
+        return substr_replace($sql, $newClause, $pos, strlen($originalClause));
     }
 
     /**
@@ -220,11 +240,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
      */
     protected function ensureGroupByOrAggregate(string $sql): string
     {
-        if (preg_match('/@@[a-zA-Z0-9_]+/', $sql)) {
-            return $sql;
-        }
-
-        if (preg_match('/\bSELECT\b.*\bFROM\b.*\bSELECT\b/is', $sql)) {
+        if (preg_match('/@@[a-zA-Z0-9_]+/', $sql) || preg_match('/\bSELECT\b.*\bFROM\b.*\bSELECT\b/is', $sql)) {
             return $sql;
         }
 
@@ -236,15 +252,16 @@ class SelectSQLRewriter extends AbstractSQLRewriter
 
         $selectClause = trim($matches[2] ?? '');
         $fromClause = trim($matches[4] ?? '');
+
+        if (empty($selectClause) || empty($fromClause)) {
+            return $sql;
+        }
+
         $whereClause = trim($matches[5] ?? '');
         $groupClause = trim($matches[6] ?? '');
         $havingClause = trim($matches[7] ?? '');
         $orderClause = trim($matches[8] ?? '');
         $limitClause = trim($matches[9] ?? '');
-
-        if (empty($selectClause) || empty($fromClause)) {
-            return $sql;
-        }
 
         $pattern = '/,(?![^\(]*\))/';
         $columns = array_map('trim', preg_split($pattern, $selectClause));
@@ -264,31 +281,19 @@ class SelectSQLRewriter extends AbstractSQLRewriter
             return $sql;
         }
 
-        $postgresSql = "SELECT $selectClause FROM $fromClause";
+        return $this->buildGroupedQuery($selectClause, $fromClause, $whereClause, $groupClause, $nonAggregateColumns, $havingClause, $orderClause, $limitClause);
+    }
 
-        if (!empty($whereClause)) {
-            $postgresSql .= " $whereClause";
-        }
-
-        if (!empty($groupClause)) {
-            $postgresSql .= " $groupClause";
-        } elseif (!empty($nonAggregateColumns)) {
-            $postgresSql .= ' GROUP BY ' . implode(", ", $nonAggregateColumns);
-        }
-
-        if (!empty($havingClause)) {
-            $postgresSql .= " $havingClause";
-        }
-
-        if (!empty($orderClause)) {
-            $postgresSql .= " $orderClause";
-        }
-
-        if (!empty($limitClause)) {
-            $postgresSql .= " $limitClause";
-        }
-
-        return $postgresSql;
+    protected function buildGroupedQuery(string $select, string $from, string $where, string $group, array $nonAggCols, string $having, string $order, string $limit): string
+    {
+        $sql = "SELECT $select FROM $from";
+        if (!empty($where))  { $sql .= " $where"; }
+        if (!empty($group))  { $sql .= " $group"; }
+        elseif (!empty($nonAggCols)) { $sql .= ' GROUP BY ' . implode(", ", $nonAggCols); }
+        if (!empty($having)) { $sql .= " $having"; }
+        if (!empty($order))  { $sql .= " $order"; }
+        if (!empty($limit))  { $sql .= " $limit"; }
+        return $sql;
     }
 
     protected function applyMySqlFunctionConversions(string $sql): string

@@ -57,6 +57,8 @@ class pg4wp_stmt
  * No direct equivalent in PostgreSQL. Connections are established directly.
  * Returns a fake connection class which does nothing
  */
+define('PG4WP_MYSQL_VERSION', '8.0.35');
+
 function wpsqli_init()
 {
     return new class {
@@ -65,7 +67,7 @@ function wpsqli_init()
         public $sslca;
         public $sslcapath;
         public $sslcipher;
-        public $client_info = '8.0.35';
+        public $client_info = PG4WP_MYSQL_VERSION;
         public $client_version = '80035';
     };
 }
@@ -246,7 +248,7 @@ function wpsqli_get_client_info()
 {
     // mysqli_get_client_info => No direct equivalent.
     // Information can be derived from phpinfo() or phpversion().
-    return '8.0.35'; // Just want to fool wordpress ...
+    return PG4WP_MYSQL_VERSION; // Just want to fool wordpress ...
 }
 
 /**
@@ -265,7 +267,7 @@ function wpsqli_get_server_info(&$connection)
     // mysqli_get_server_info => pg_version (resource $connection): array
     // This function retrieves an array that includes server version.
     // pg_version($connection);
-    return '8.0.35'; // Just want to fool wordpress ...
+    return PG4WP_MYSQL_VERSION; // Just want to fool wordpress ...
 }
 
 /**

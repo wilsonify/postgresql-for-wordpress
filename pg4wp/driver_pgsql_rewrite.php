@@ -44,13 +44,14 @@ function pg4wp_rewrite($sql)
     $rewriter = createSQLRewriter(trim($sql));
     $sql = $rewriter->rewrite();
     $logto = strtoupper($rewriter->type());
+    $setToken = ' SET ';
     switch ($rewriter->type()) {
         case 'Update':
             // This will avoid modifications to anything following ' SET '
             // Normalize whitespace before SET to handle newlines
-            $sql = preg_replace('/\s+SET\s+/i', ' SET ', $sql, 1);
-            list($sql, $end) = explode(' SET ', $sql, 2);
-            $end = ' SET ' . $end;
+            $sql = preg_replace('/\s+SET\s+/i', $setToken, $sql, 1);
+            list($sql, $end) = explode($setToken, $sql, 2);
+            $end = $setToken . $end;
             break;
         case 'Insert':
             // This will avoid modifications to anything following ' VALUES'
@@ -76,31 +77,7 @@ function pg4wp_rewrite($sql)
     // Put back the end of the query if it was separated
     $sql .= $end;
 
-    // For insert ID caching
-    if($logto == 'INSERT') {
-        $pattern = '/INSERT INTO "?(\w+)"? \(([^)]+)\)/i';
-        preg_match($pattern, $sql, $matches);
-
-        if (isset($matches[1])) {
-            $GLOBALS['pg4wp_ins_table'] = $matches[1];
-        }
-
-        if (isset($matches[2])) {
-            $columns_str = $matches[2];
-            $columns = explode(',', $columns_str);
-            $columns = array_map(function ($column) {
-                return trim(trim($column), '"');
-            }, $columns);
-            if (isset($columns[0])) {
-                $GLOBALS['pg4wp_ins_field'] = $columns[0];
-            }
-        }
-
-        $GLOBALS['pg4wp_last_insert'] = $sql;
-    } elseif(isset($GLOBALS['pg4wp_queued_query'])) {
-        pg_query($GLOBALS['pg4wp_queued_query']);
-        unset($GLOBALS['pg4wp_queued_query']);
-    }
+    cacheInsertId($sql, $logto);
 
     if(PG4WP_DEBUG) {
         if($initial != $sql) {
@@ -110,6 +87,28 @@ function pg4wp_rewrite($sql)
         }
     }
     return $sql;
+}
+
+function cacheInsertId(string $sql, string $logto): void
+{
+    if ($logto === 'INSERT') {
+        preg_match('/INSERT INTO "?(\w+)"? \(([^)]+)\)/i', $sql, $matches);
+        if (isset($matches[1])) {
+            $GLOBALS['pg4wp_ins_table'] = $matches[1];
+        }
+        if (isset($matches[2])) {
+            $columns = array_map(function ($c) { return trim(trim($c), '"'); }, explode(',', $matches[2]));
+            if (isset($columns[0])) {
+                $GLOBALS['pg4wp_ins_field'] = $columns[0];
+            }
+        }
+        $GLOBALS['pg4wp_last_insert'] = $sql;
+        return;
+    }
+    if (isset($GLOBALS['pg4wp_queued_query'])) {
+        pg_query($GLOBALS['pg4wp_queued_query']);
+        unset($GLOBALS['pg4wp_queued_query']);
+    }
 }
 
 /**
