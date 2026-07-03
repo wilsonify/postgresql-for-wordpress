@@ -45,8 +45,32 @@ function get_locale() {
 	}
 
 	// If multisite, check options.
+	$locale = get_locale_from_network( $locale );
+
+	if ( empty( $locale ) ) {
+		$locale = 'en_US';
+	}
+
+	/**
+	 * Filters the locale ID of the WordPress installation.
+	 *
+	 * @since 1.5.0
+	 *
+	 * @param string $locale The locale ID.
+	 */
+	return apply_filters( 'locale', $locale );
+}
+
+/**
+ * Retrieves the locale from multisite or single site options.
+ *
+ * @since 6.8.0
+ *
+ * @param string $locale The current locale.
+ * @return string The updated locale.
+ */
+function get_locale_from_network( $locale ) {
 	if ( is_multisite() ) {
-		// Don't check blog option when installing.
 		if ( wp_installing() ) {
 			$ms_locale = get_site_option( 'WPLANG' );
 		} else {
@@ -66,19 +90,9 @@ function get_locale() {
 		}
 	}
 
-	if ( empty( $locale ) ) {
-		$locale = 'en_US';
-	}
-
-	/**
-	 * Filters the locale ID of the WordPress installation.
-	 *
-	 * @since 1.5.0
-	 *
-	 * @param string $locale The locale ID.
-	 */
-	return apply_filters( 'locale', $locale );
+	return $locale;
 }
+
 
 /**
  * Retrieves the locale of a user.
@@ -1114,58 +1128,9 @@ function load_script_textdomain( $handle, $domain = 'default', $path = '' ) {
 		$src = $wp_scripts->base_url . $src;
 	}
 
-	$relative       = false;
-	$languages_path = WP_LANG_DIR;
-
-	$src_url     = wp_parse_url( $src );
-	$content_url = wp_parse_url( content_url() );
-	$plugins_url = wp_parse_url( plugins_url() );
-	$site_url    = wp_parse_url( site_url() );
-
-	// If the host is the same or it's a relative URL.
-	if (
-		( ! isset( $content_url['path'] ) || str_starts_with( $src_url['path'], $content_url['path'] ) ) &&
-		( ! isset( $src_url['host'] ) || ! isset( $content_url['host'] ) || $src_url['host'] === $content_url['host'] )
-	) {
-		// Make the src relative the specific plugin or theme.
-		if ( isset( $content_url['path'] ) ) {
-			$relative = substr( $src_url['path'], strlen( $content_url['path'] ) );
-		} else {
-			$relative = $src_url['path'];
-		}
-		$relative = trim( $relative, '/' );
-		$relative = explode( '/', $relative );
-
-		$languages_path = WP_LANG_DIR . '/' . $relative[0];
-
-		$relative = array_slice( $relative, 2 ); // Remove plugins/<plugin name> or themes/<theme name>.
-		$relative = implode( '/', $relative );
-	} elseif (
-		( ! isset( $plugins_url['path'] ) || str_starts_with( $src_url['path'], $plugins_url['path'] ) ) &&
-		( ! isset( $src_url['host'] ) || ! isset( $plugins_url['host'] ) || $src_url['host'] === $plugins_url['host'] )
-	) {
-		// Make the src relative the specific plugin.
-		if ( isset( $plugins_url['path'] ) ) {
-			$relative = substr( $src_url['path'], strlen( $plugins_url['path'] ) );
-		} else {
-			$relative = $src_url['path'];
-		}
-		$relative = trim( $relative, '/' );
-		$relative = explode( '/', $relative );
-
-		$languages_path = WP_LANG_DIR . '/plugins';
-
-		$relative = array_slice( $relative, 1 ); // Remove <plugin name>.
-		$relative = implode( '/', $relative );
-	} elseif ( ! isset( $src_url['host'] ) || ! isset( $site_url['host'] ) || $src_url['host'] === $site_url['host'] ) {
-		if ( ! isset( $site_url['path'] ) ) {
-			$relative = trim( $src_url['path'], '/' );
-		} elseif ( str_starts_with( $src_url['path'], trailingslashit( $site_url['path'] ) ) ) {
-			// Make the src relative to the WP root.
-			$relative = substr( $src_url['path'], strlen( $site_url['path'] ) );
-			$relative = trim( $relative, '/' );
-		}
-	}
+	$result = resolve_script_relative_path( $src );
+	$relative = $result['relative'];
+	$languages_path = $result['languages_path'];
 
 	/**
 	 * Filters the relative path of scripts used for finding translation files.
@@ -1204,6 +1169,68 @@ function load_script_textdomain( $handle, $domain = 'default', $path = '' ) {
 	}
 
 	return load_script_translations( false, $handle, $domain );
+}
+
+/**
+ * Resolves the relative path of a script URL for finding translation files.
+ *
+ * @since 6.8.0
+ * @access private
+ *
+ * @param string $src The full source URL of the script.
+ * @return array{ relative: string|false, languages_path: string } Relative path and languages directory.
+ */
+function resolve_script_relative_path( $src ) {
+	$relative       = false;
+	$languages_path = WP_LANG_DIR;
+
+	$src_url     = wp_parse_url( $src );
+	$content_url = wp_parse_url( content_url() );
+	$plugins_url = wp_parse_url( plugins_url() );
+	$site_url    = wp_parse_url( site_url() );
+
+	if (
+		( ! isset( $content_url['path'] ) || str_starts_with( $src_url['path'], $content_url['path'] ) ) &&
+		( ! isset( $src_url['host'] ) || ! isset( $content_url['host'] ) || $src_url['host'] === $content_url['host'] )
+	) {
+		if ( isset( $content_url['path'] ) ) {
+			$relative = substr( $src_url['path'], strlen( $content_url['path'] ) );
+		} else {
+			$relative = $src_url['path'];
+		}
+		$relative = trim( $relative, '/' );
+		$relative = explode( '/', $relative );
+
+		$languages_path = WP_LANG_DIR . '/' . $relative[0];
+
+		$relative = array_slice( $relative, 2 );
+		$relative = implode( '/', $relative );
+	} elseif (
+		( ! isset( $plugins_url['path'] ) || str_starts_with( $src_url['path'], $plugins_url['path'] ) ) &&
+		( ! isset( $src_url['host'] ) || ! isset( $plugins_url['host'] ) || $src_url['host'] === $plugins_url['host'] )
+	) {
+		if ( isset( $plugins_url['path'] ) ) {
+			$relative = substr( $src_url['path'], strlen( $plugins_url['path'] ) );
+		} else {
+			$relative = $src_url['path'];
+		}
+		$relative = trim( $relative, '/' );
+		$relative = explode( '/', $relative );
+
+		$languages_path = WP_LANG_DIR . '/plugins';
+
+		$relative = array_slice( $relative, 1 );
+		$relative = implode( '/', $relative );
+	} elseif ( ! isset( $src_url['host'] ) || ! isset( $site_url['host'] ) || $src_url['host'] === $site_url['host'] ) {
+		if ( ! isset( $site_url['path'] ) ) {
+			$relative = trim( $src_url['path'], '/' );
+		} elseif ( str_starts_with( $src_url['path'], trailingslashit( $site_url['path'] ) ) ) {
+			$relative = substr( $src_url['path'], strlen( $site_url['path'] ) );
+			$relative = trim( $relative, '/' );
+		}
+	}
+
+	return array( 'relative' => $relative, 'languages_path' => $languages_path );
 }
 
 /**
@@ -1399,13 +1426,14 @@ function get_available_languages( $dir = null ) {
 
 	$lang_files = glob( ( is_null( $dir ) ? WP_LANG_DIR : $dir ) . '/*.mo' );
 	if ( $lang_files ) {
-		foreach ( $lang_files as $lang_file ) {
-			$lang_file = basename( $lang_file, '.mo' );
-			if ( ! str_starts_with( $lang_file, 'continents-cities' ) && ! str_starts_with( $lang_file, 'ms-' ) &&
-				! str_starts_with( $lang_file, 'admin-' ) ) {
-				$languages[] = $lang_file;
-			}
-		}
+		$languages = array_values( array_filter( array_map(
+			function ( $f ) { return basename( $f, '.mo' ); },
+			$lang_files
+		), function ( $f ) {
+			return ! str_starts_with( $f, 'continents-cities' )
+				&& ! str_starts_with( $f, 'ms-' )
+				&& ! str_starts_with( $f, 'admin-' );
+		} ) );
 	}
 
 	/**
@@ -1566,30 +1594,9 @@ function wp_dropdown_languages( $args = array() ) {
 		$translations = wp_get_available_translations();
 	}
 
-	/*
-	 * $parsed_args['languages'] should only contain the locales. Find the locale in
-	 * $translations to get the native name. Fall back to locale.
-	 */
-	$languages = array();
-	foreach ( $parsed_args['languages'] as $locale ) {
-		if ( isset( $translations[ $locale ] ) ) {
-			$translation = $translations[ $locale ];
-			$languages[] = array(
-				'language'    => $translation['language'],
-				'native_name' => $translation['native_name'],
-				'lang'        => current( $translation['iso'] ),
-			);
-
-			// Remove installed language from available translations.
-			unset( $translations[ $locale ] );
-		} else {
-			$languages[] = array(
-				'language'    => $locale,
-				'native_name' => $locale,
-				'lang'        => '',
-			);
-		}
-	}
+	$result = build_languages_dropdown_data( $parsed_args['languages'], $translations );
+	$languages = $result['languages'];
+	$translations = $result['translations'];
 
 	$translations_available = ( ! empty( $translations ) && $parsed_args['show_available_translations'] );
 
@@ -1658,6 +1665,39 @@ function wp_dropdown_languages( $args = array() ) {
 	}
 
 	return $output;
+}
+
+/**
+ * Builds the languages array for the dropdown and removes installed languages from available translations.
+ *
+ * @since 6.8.0
+ * @access private
+ *
+ * @param string[] $locales      Array of installed language locales.
+ * @param array[]  $translations Array of available translations keyed by locale.
+ * @return array{ languages: array[], translations: array[] } Languages data and remaining translations.
+ */
+function build_languages_dropdown_data( $locales, $translations ) {
+	$languages = array();
+	foreach ( $locales as $locale ) {
+		if ( isset( $translations[ $locale ] ) ) {
+			$translation = $translations[ $locale ];
+			$languages[] = array(
+				'language'    => $translation['language'],
+				'native_name' => $translation['native_name'],
+				'lang'        => current( $translation['iso'] ),
+			);
+
+			unset( $translations[ $locale ] );
+		} else {
+			$languages[] = array(
+				'language'    => $locale,
+				'native_name' => $locale,
+				'lang'        => '',
+			);
+		}
+	}
+	return array( 'languages' => $languages, 'translations' => $translations );
 }
 
 /**
@@ -1807,21 +1847,38 @@ function translate_settings_using_i18n_schema( $i18n_schema, $settings, $textdom
 		return $translated_settings;
 	}
 	if ( is_object( $i18n_schema ) && is_array( $settings ) ) {
-		$group_key           = '*';
-		$translated_settings = array();
-		foreach ( $settings as $key => $value ) {
-			if ( isset( $i18n_schema->$key ) ) {
-				$translated_settings[ $key ] = translate_settings_using_i18n_schema( $i18n_schema->$key, $value, $textdomain );
-			} elseif ( isset( $i18n_schema->$group_key ) ) {
-				$translated_settings[ $key ] = translate_settings_using_i18n_schema( $i18n_schema->$group_key, $value, $textdomain );
-			} else {
-				$translated_settings[ $key ] = $value;
-			}
-		}
-		return $translated_settings;
+		return translate_object_i18n_schema( $i18n_schema, $settings, $textdomain );
 	}
 	return $settings;
 }
+
+/**
+ * Translates settings using an object i18n schema.
+ *
+ * @since 6.8.0
+ * @access private
+ *
+ * @param object $i18n_schema I18n schema for the setting.
+ * @param array  $settings    Value for the settings.
+ * @param string $textdomain  Textdomain to use with translations.
+ *
+ * @return array Translated settings.
+ */
+function translate_object_i18n_schema( $i18n_schema, $settings, $textdomain ) {
+	$group_key           = '*';
+	$translated_settings = array();
+	foreach ( $settings as $key => $value ) {
+		if ( isset( $i18n_schema->$key ) ) {
+			$translated_settings[ $key ] = translate_settings_using_i18n_schema( $i18n_schema->$key, $value, $textdomain );
+		} elseif ( isset( $i18n_schema->$group_key ) ) {
+			$translated_settings[ $key ] = translate_settings_using_i18n_schema( $i18n_schema->$group_key, $value, $textdomain );
+		} else {
+			$translated_settings[ $key ] = $value;
+		}
+	}
+	return $translated_settings;
+}
+
 
 /**
  * Retrieves the list item separator based on the locale.

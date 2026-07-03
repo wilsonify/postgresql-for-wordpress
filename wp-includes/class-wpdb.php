@@ -37,6 +37,16 @@ define( 'ARRAY_A', 'ARRAY_A' );
 define( 'ARRAY_N', 'ARRAY_N' );
 
 /**
+ * @since 6.8.0
+ */
+define( 'WP_DEPRECATED_VERSION', WP_DEPRECATED_VERSION );
+
+/**
+ * @since 6.8.0
+ */
+define( 'WP_QUERY_TRIM_CHARS', "\r\n\t (" );
+
+/**
  * WordPress database access abstraction class.
  *
  * This class is used to interact with a database without needing to use raw SQL statements.
@@ -1156,28 +1166,43 @@ class wpdb {
 		}
 
 		if ( $prefix ) {
-			if ( ! $blog_id ) {
-				$blog_id = $this->blogid;
-			}
-			$blog_prefix   = $this->get_blog_prefix( $blog_id );
-			$base_prefix   = $this->base_prefix;
-			$global_tables = array_merge( $this->global_tables, $this->ms_global_tables );
-			foreach ( $tables as $k => $table ) {
-				if ( in_array( $table, $global_tables, true ) ) {
-					$tables[ $table ] = $base_prefix . $table;
-				} else {
-					$tables[ $table ] = $blog_prefix . $table;
-				}
-				unset( $tables[ $k ] );
-			}
+			$tables = $this->apply_table_prefix( $tables, $blog_id );
+		}
 
-			if ( isset( $tables['users'] ) && defined( 'CUSTOM_USER_TABLE' ) ) {
-				$tables['users'] = CUSTOM_USER_TABLE;
-			}
+		return $tables;
+	}
 
-			if ( isset( $tables['usermeta'] ) && defined( 'CUSTOM_USER_META_TABLE' ) ) {
-				$tables['usermeta'] = CUSTOM_USER_META_TABLE;
+	/**
+	 * Applies table prefixes to a list of table names.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param string[] $tables  Table names to prefix.
+	 * @param int      $blog_id Blog ID to use for prefix.
+	 * @return string[] Prefixed table names.
+	 */
+	private function apply_table_prefix( $tables, $blog_id ) {
+		if ( ! $blog_id ) {
+			$blog_id = $this->blogid;
+		}
+		$blog_prefix   = $this->get_blog_prefix( $blog_id );
+		$base_prefix   = $this->base_prefix;
+		$global_tables = array_merge( $this->global_tables, $this->ms_global_tables );
+		foreach ( $tables as $k => $table ) {
+			if ( in_array( $table, $global_tables, true ) ) {
+				$tables[ $table ] = $base_prefix . $table;
+			} else {
+				$tables[ $table ] = $blog_prefix . $table;
 			}
+			unset( $tables[ $k ] );
+		}
+
+		if ( isset( $tables['users'] ) && defined( 'CUSTOM_USER_TABLE' ) ) {
+			$tables['users'] = CUSTOM_USER_TABLE;
+		}
+
+		if ( isset( $tables['usermeta'] ) && defined( 'CUSTOM_USER_META_TABLE' ) ) {
+			$tables['usermeta'] = CUSTOM_USER_META_TABLE;
 		}
 
 		return $tables;
@@ -1259,7 +1284,7 @@ class wpdb {
 	 */
 	public function _weak_escape( $data ) {
 		if ( func_num_args() === 1 && function_exists( '_deprecated_function' ) ) {
-			_deprecated_function( __METHOD__, '3.6.0', 'wpdb::prepare() or esc_sql()' );
+			_deprecated_function( __METHOD__, WP_DEPRECATED_VERSION, 'wpdb::prepare() or esc_sql()' );
 		}
 		return addslashes( $data );
 	}
@@ -1286,7 +1311,7 @@ class wpdb {
 
 			wp_load_translations_early();
 			/* translators: %s: Database access abstraction class, usually wpdb or a class extending wpdb. */
-			_doing_it_wrong( $class, sprintf( __( '%s must set a database connection for use with escaping.' ), $class ), '3.6.0' );
+			_doing_it_wrong( $class, sprintf( __( '%s must set a database connection for use with escaping.' ), $class ), WP_DEPRECATED_VERSION );
 
 			$escaped = addslashes( $data );
 		}
@@ -1335,7 +1360,7 @@ class wpdb {
 	 */
 	public function escape( $data ) {
 		if ( func_num_args() === 1 && function_exists( '_deprecated_function' ) ) {
-			_deprecated_function( __METHOD__, '3.6.0', 'wpdb::prepare() or esc_sql()' );
+			_deprecated_function( __METHOD__, WP_DEPRECATED_VERSION, 'wpdb::prepare() or esc_sql()' );
 		}
 		if ( is_array( $data ) ) {
 			foreach ( $data as $k => $v ) {
@@ -1459,111 +1484,83 @@ class wpdb {
 			return;
 		}
 
-		/*
-		 * This is not meant to be foolproof -- but it will catch obviously incorrect usage.
-		 *
-		 * Note: str_contains() is not used here, as this file can be included
-		 * directly outside of WordPress core, e.g. by HyperDB, in which case
-		 * the polyfills from wp-includes/compat.php are not loaded.
-		 */
 		if ( false === strpos( $query, '%' ) ) {
-			wp_load_translations_early();
-			_doing_it_wrong(
-				'wpdb::prepare',
-				sprintf(
-					/* translators: %s: wpdb::prepare() */
-					__( 'The query argument of %s must have a placeholder.' ),
-					'wpdb::prepare()'
-				),
-				'3.9.0'
-			);
+			$this->warn_missing_placeholder();
 		}
 
-		/*
-		 * Specify the formatting allowed in a placeholder. The following are allowed:
-		 *
-		 * - Sign specifier, e.g. $+d
-		 * - Numbered placeholders, e.g. %1$s
-		 * - Padding specifier, including custom padding characters, e.g. %05s, %'#5s
-		 * - Alignment specifier, e.g. %05-s
-		 * - Precision specifier, e.g. %.2f
-		 */
-		$allowed_format = '(?:[1-9][0-9]*[$])?[-+0-9]*(?: |0|\'.)?[-+0-9]*(?:\.[0-9]+)?';
+		$query = $this->normalize_placeholders( $query );
 
-		/*
-		 * If a %s placeholder already has quotes around it, removing the existing quotes
-		 * and re-inserting them ensures the quotes are consistent.
-		 *
-		 * For backward compatibility, this is only applied to %s, and not to placeholders like %1$s,
-		 * which are frequently used in the middle of longer strings, or as table name placeholders.
-		 */
-		$query = str_replace( "'%s'", '%s', $query ); // Strip any existing single quotes.
-		$query = str_replace( '"%s"', '%s', $query ); // Strip any existing double quotes.
-
-		// Escape any unescaped percents (i.e. anything unrecognised).
-		$query = preg_replace( "/%(?:%|$|(?!($allowed_format)?[sdfFi]))/", '%%\\1', $query );
-
-		// Extract placeholders from the query.
-		$split_query = preg_split( "/(^|[^%]|(?:%%)+)(%(?:$allowed_format)?[sdfFi])/", $query, -1, PREG_SPLIT_DELIM_CAPTURE );
-
+		$split_query = preg_split( "/(^|[^%]|(?:%%)+)(%(?:(?:[1-9][0-9]*[$])?[-+0-9]*(?: |0|\'.)?[-+0-9]*(?:\.[0-9]+)?)?[sdfFi])/", $query, -1, PREG_SPLIT_DELIM_CAPTURE );
 		$split_query_count = count( $split_query );
-
-		/*
-		 * Split always returns with 1 value before the first placeholder (even with $query = "%s"),
-		 * then 3 additional values per placeholder.
-		 */
 		$placeholder_count = ( ( $split_query_count - 1 ) / 3 );
 
-		// If args were passed as an array, as in vsprintf(), move them up.
 		$passed_as_array = ( isset( $args[0] ) && is_array( $args[0] ) && 1 === count( $args ) );
 		if ( $passed_as_array ) {
 			$args = $args[0];
 		}
 
+		$result = $this->process_placeholders( $split_query, $split_query_count );
+		$query = $result['query'];
+		$arg_identifiers = $result['identifiers'];
+		$arg_strings = $result['strings'];
+		$placeholder_count_adjusted = $result['placeholder_count'];
+
+		if ( $this->has_dual_use_conflicts( $arg_identifiers, $arg_strings, $split_query, $split_query_count ) ) {
+			return;
+		}
+
+		$validated = $this->validate_placeholder_count( $args, $placeholder_count_adjusted, $passed_as_array, $split_query, $split_query_count );
+		if ( true !== $validated ) {
+			return $validated;
+		}
+
+		$args_escaped = $this->escape_prepare_args( $args, $arg_identifiers );
+		$query = vsprintf( $query, $args_escaped );
+
+		return $this->add_placeholder_escape( $query );
+	}
+
+	private function warn_missing_placeholder() {
+		wp_load_translations_early();
+		_doing_it_wrong(
+			'wpdb::prepare',
+			sprintf( __( 'The query argument of %s must have a placeholder.' ), 'wpdb::prepare()' ),
+			'3.9.0'
+		);
+	}
+
+	private function normalize_placeholders( $query ) {
+		$query = str_replace( "'%s'", '%s', $query );
+		$query = str_replace( '"%s"', '%s', $query );
+		$allowed_format = '(?:[1-9][0-9]*[$])?[-+0-9]*(?: |0|\'.)?[-+0-9]*(?:\.[0-9]+)?';
+		return preg_replace( "/%(?:%|$|(?!($allowed_format)?[sdfFi]))/", '%%\\1', $query );
+	}
+
+	private function process_placeholders( array $split_query, int $split_query_count ): array {
 		$new_query       = '';
-		$key             = 2; // Keys 0 and 1 in $split_query contain values before the first placeholder.
+		$key             = 2;
 		$arg_id          = 0;
 		$arg_identifiers = array();
 		$arg_strings     = array();
+		$placeholder_count = ( ( $split_query_count - 1 ) / 3 );
 
 		while ( $key < $split_query_count ) {
 			$placeholder = $split_query[ $key ];
-
 			$format = substr( $placeholder, 1, -1 );
 			$type   = substr( $placeholder, -1 );
 
 			if ( 'f' === $type && true === $this->allow_unsafe_unquoted_parameters
-				/*
-				 * Note: str_ends_with() is not used here, as this file can be included
-				 * directly outside of WordPress core, e.g. by HyperDB, in which case
-				 * the polyfills from wp-includes/compat.php are not loaded.
-				 */
 				&& '%' === substr( $split_query[ $key - 1 ], -1, 1 )
 			) {
-
-				/*
-				 * Before WP 6.2 the "force floats to be locale-unaware" RegEx didn't
-				 * convert "%%%f" to "%%%F" (note the uppercase F).
-				 * This was because it didn't check to see if the leading "%" was escaped.
-				 * And because the "Escape any unescaped percents" RegEx used "[sdF]" in its
-				 * negative lookahead assertion, when there was an odd number of "%", it added
-				 * an extra "%", to give the fully escaped "%%%%f" (not a placeholder).
-				 */
-
 				$s = $split_query[ $key - 2 ] . $split_query[ $key - 1 ];
 				$k = 1;
 				$l = strlen( $s );
 				while ( $k <= $l && '%' === $s[ $l - $k ] ) {
 					++$k;
 				}
-
 				$placeholder = '%' . ( $k % 2 ? '%' : '' ) . $format . $type;
-
 				--$placeholder_count;
-
 			} else {
-
-				// Force floats to be locale-unaware.
 				if ( 'f' === $type ) {
 					$type        = 'F';
 					$placeholder = '%' . $format . $type;
@@ -1571,39 +1568,20 @@ class wpdb {
 
 				if ( 'i' === $type ) {
 					$placeholder = '`%' . $format . 's`';
-					// Using a simple strpos() due to previous checking (e.g. $allowed_format).
 					$argnum_pos = strpos( $format, '$' );
-
 					if ( false !== $argnum_pos ) {
-						// sprintf() argnum starts at 1, $arg_id from 0.
 						$arg_identifiers[] = ( ( (int) substr( $format, 0, $argnum_pos ) ) - 1 );
 					} else {
 						$arg_identifiers[] = $arg_id;
 					}
 				} elseif ( 'd' !== $type && 'F' !== $type ) {
-					/*
-					 * i.e. ( 's' === $type ), where 'd' and 'F' keeps $placeholder unchanged,
-					 * and we ensure string escaping is used as a safe default (e.g. even if 'x').
-					 */
 					$argnum_pos = strpos( $format, '$' );
-
 					if ( false !== $argnum_pos ) {
 						$arg_strings[] = ( ( (int) substr( $format, 0, $argnum_pos ) ) - 1 );
 					} else {
 						$arg_strings[] = $arg_id;
 					}
-
-					/*
-					 * Unquoted strings for backward compatibility (dangerous).
-					 * First, "numbered or formatted string placeholders (eg, %1$s, %5s)".
-					 * Second, if "%s" has a "%" before it, even if it's unrelated (e.g. "LIKE '%%%s%%'").
-					 */
 					if ( true !== $this->allow_unsafe_unquoted_parameters
-						/*
-						 * Note: str_ends_with() is not used here, as this file can be included
-						 * directly outside of WordPress core, e.g. by HyperDB, in which case
-						 * the polyfills from wp-includes/compat.php are not loaded.
-						 */
 						|| ( '' === $format && '%' !== substr( $split_query[ $key - 1 ], -1, 1 ) )
 					) {
 						$placeholder = "'%" . $format . "s'";
@@ -1611,122 +1589,106 @@ class wpdb {
 				}
 			}
 
-			// Glue (-2), any leading characters (-1), then the new $placeholder.
 			$new_query .= $split_query[ $key - 2 ] . $split_query[ $key - 1 ] . $placeholder;
-
 			$key += 3;
 			++$arg_id;
 		}
 
-		// Replace $query; and add remaining $query characters, or index 0 if there were no placeholders.
-		$query = $new_query . $split_query[ $key - 2 ];
+		return array(
+			'query'             => $new_query . $split_query[ $key - 2 ],
+			'identifiers'       => $arg_identifiers,
+			'strings'           => $arg_strings,
+			'placeholder_count' => $placeholder_count,
+		);
+	}
 
+	private function has_dual_use_conflicts( array $arg_identifiers, array $arg_strings, array $split_query, int $split_query_count ): bool {
 		$dual_use = array_intersect( $arg_identifiers, $arg_strings );
+		if ( count( $dual_use ) === 0 ) {
+			return false;
+		}
 
-		if ( count( $dual_use ) > 0 ) {
+		wp_load_translations_early();
+		$used_placeholders = array();
+		$key    = 2;
+		$arg_id = 0;
+		while ( $key < $split_query_count ) {
+			$placeholder = $split_query[ $key ];
+			$format = substr( $placeholder, 1, -1 );
+			$argnum_pos = strpos( $format, '$' );
+			if ( false !== $argnum_pos ) {
+				$arg_pos = ( ( (int) substr( $format, 0, $argnum_pos ) ) - 1 );
+			} else {
+				$arg_pos = $arg_id;
+			}
+			$used_placeholders[ $arg_pos ][] = $placeholder;
+			$key += 3;
+			++$arg_id;
+		}
+
+		$conflicts = array();
+		foreach ( $dual_use as $arg_pos ) {
+			$conflicts[] = implode( ' and ', $used_placeholders[ $arg_pos ] );
+		}
+
+		_doing_it_wrong(
+			'wpdb::prepare',
+			sprintf( __( 'Arguments cannot be prepared as both an Identifier and Value. Found the following conflicts: %s' ), implode( ', ', $conflicts ) ),
+			'6.2.0'
+		);
+		return true;
+	}
+
+	/**
+	 * @return true|string|null True if valid, '' if should return empty, null if should return void.
+	 */
+	private function validate_placeholder_count( array $args, int $placeholder_count, bool $passed_as_array, array $split_query, int $split_query_count ) {
+		$args_count = count( $args );
+		if ( $args_count === $placeholder_count ) {
+			return true;
+		}
+
+		if ( 1 === $placeholder_count && $passed_as_array ) {
 			wp_load_translations_early();
-
-			$used_placeholders = array();
-
-			$key    = 2;
-			$arg_id = 0;
-			// Parse again (only used when there is an error).
-			while ( $key < $split_query_count ) {
-				$placeholder = $split_query[ $key ];
-
-				$format = substr( $placeholder, 1, -1 );
-
-				$argnum_pos = strpos( $format, '$' );
-
-				if ( false !== $argnum_pos ) {
-					$arg_pos = ( ( (int) substr( $format, 0, $argnum_pos ) ) - 1 );
-				} else {
-					$arg_pos = $arg_id;
-				}
-
-				$used_placeholders[ $arg_pos ][] = $placeholder;
-
-				$key += 3;
-				++$arg_id;
-			}
-
-			$conflicts = array();
-			foreach ( $dual_use as $arg_pos ) {
-				$conflicts[] = implode( ' and ', $used_placeholders[ $arg_pos ] );
-			}
-
 			_doing_it_wrong(
 				'wpdb::prepare',
-				sprintf(
-					/* translators: %s: A list of placeholders found to be a problem. */
-					__( 'Arguments cannot be prepared as both an Identifier and Value. Found the following conflicts: %s' ),
-					implode( ', ', $conflicts )
-				),
-				'6.2.0'
+				__( 'The query only expected one placeholder, but an array of multiple placeholders was sent.' ),
+				'4.9.0'
 			);
-
-			return;
+			return null;
 		}
 
-		$args_count = count( $args );
+		wp_load_translations_early();
+		_doing_it_wrong(
+			'wpdb::prepare',
+			sprintf(
+				__( 'The query does not contain the correct number of placeholders (%1$d) for the number of arguments passed (%2$d).' ),
+				$placeholder_count,
+				$args_count
+			),
+			'4.8.3'
+		);
 
-		if ( $args_count !== $placeholder_count ) {
-			if ( 1 === $placeholder_count && $passed_as_array ) {
-				/*
-				 * If the passed query only expected one argument,
-				 * but the wrong number of arguments was sent as an array, bail.
-				 */
-				wp_load_translations_early();
-				_doing_it_wrong(
-					'wpdb::prepare',
-					__( 'The query only expected one placeholder, but an array of multiple placeholders was sent.' ),
-					'4.9.0'
-				);
+		if ( $args_count >= $placeholder_count ) {
+			return true;
+		}
 
-				return;
-			} else {
-				/*
-				 * If we don't have the right number of placeholders,
-				 * but they were passed as individual arguments,
-				 * or we were expecting multiple arguments in an array, throw a warning.
-				 */
-				wp_load_translations_early();
-				_doing_it_wrong(
-					'wpdb::prepare',
-					sprintf(
-						/* translators: 1: Number of placeholders, 2: Number of arguments passed. */
-						__( 'The query does not contain the correct number of placeholders (%1$d) for the number of arguments passed (%2$d).' ),
-						$placeholder_count,
-						$args_count
-					),
-					'4.8.3'
-				);
-
-				/*
-				 * If we don't have enough arguments to match the placeholders,
-				 * return an empty string to avoid a fatal error on PHP 8.
-				 */
-				if ( $args_count < $placeholder_count ) {
-					$max_numbered_placeholder = 0;
-
-					for ( $i = 2, $l = $split_query_count; $i < $l; $i += 3 ) {
-						// Assume a leading number is for a numbered placeholder, e.g. '%3$s'.
-						$argnum = (int) substr( $split_query[ $i ], 1 );
-
-						if ( $max_numbered_placeholder < $argnum ) {
-							$max_numbered_placeholder = $argnum;
-						}
-					}
-
-					if ( ! $max_numbered_placeholder || $args_count < $max_numbered_placeholder ) {
-						return '';
-					}
-				}
+		$max_numbered_placeholder = 0;
+		for ( $i = 2, $l = $split_query_count; $i < $l; $i += 3 ) {
+			$argnum = (int) substr( $split_query[ $i ], 1 );
+			if ( $max_numbered_placeholder < $argnum ) {
+				$max_numbered_placeholder = $argnum;
 			}
 		}
 
-		$args_escaped = array();
+		if ( ! $max_numbered_placeholder || $args_count < $max_numbered_placeholder ) {
+			return '';
+		}
+		return true;
+	}
 
+	private function escape_prepare_args( array $args, array $arg_identifiers ): array {
+		$args_escaped = array();
 		foreach ( $args as $i => $value ) {
 			if ( in_array( $i, $arg_identifiers, true ) ) {
 				$args_escaped[] = $this->_escape_identifier_value( $value );
@@ -1737,25 +1699,15 @@ class wpdb {
 					wp_load_translations_early();
 					_doing_it_wrong(
 						'wpdb::prepare',
-						sprintf(
-							/* translators: %s: Value type. */
-							__( 'Unsupported value type (%s).' ),
-							gettype( $value )
-						),
+						sprintf( __( 'Unsupported value type (%s).' ), gettype( $value ) ),
 						'4.8.2'
 					);
-
-					// Preserving old behavior, where values are escaped as strings.
 					$value = '';
 				}
-
 				$args_escaped[] = $this->_real_escape( $value );
 			}
 		}
-
-		$query = vsprintf( $query, $args_escaped );
-
-		return $this->add_placeholder_escape( $query );
+		return $args_escaped;
 	}
 
 	/**
@@ -3023,21 +2975,30 @@ class wpdb {
 	public function get_var( $query = null, $x = 0, $y = 0 ) {
 		$this->func_call = "\$db->get_var(\"$query\", $x, $y)";
 
-		if ( $query ) {
-			if ( $this->check_current_query && $this->check_safe_collation( $query ) ) {
-				$this->check_current_query = false;
-			}
+		$this->maybe_run_query( $query );
 
-			$this->query( $query );
-		}
-
-		// Extract var out of cached results based on x,y vals.
 		if ( ! empty( $this->last_result[ $y ] ) ) {
 			$values = array_values( get_object_vars( $this->last_result[ $y ] ) );
 		}
 
-		// If there is a value return it, else return null.
 		return ( isset( $values[ $x ] ) && '' !== $values[ $x ] ) ? $values[ $x ] : null;
+	}
+
+	/**
+	 * Runs a query if provided, with collation checking.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param string|null $query SQL query string or null.
+	 */
+	private function maybe_run_query( $query ) {
+		if ( ! $query ) {
+			return;
+		}
+		if ( $this->check_current_query && $this->check_safe_collation( $query ) ) {
+			$this->check_current_query = false;
+		}
+		$this->query( $query );
 	}
 
 	/**
@@ -3057,15 +3018,11 @@ class wpdb {
 	public function get_row( $query = null, $output = OBJECT, $y = 0 ) {
 		$this->func_call = "\$db->get_row(\"$query\",$output,$y)";
 
-		if ( $query ) {
-			if ( $this->check_current_query && $this->check_safe_collation( $query ) ) {
-				$this->check_current_query = false;
-			}
-
-			$this->query( $query );
-		} else {
+		if ( ! $query ) {
 			return null;
 		}
+
+		$this->maybe_run_query( $query );
 
 		if ( ! isset( $this->last_result[ $y ] ) ) {
 			return null;
@@ -3078,7 +3035,6 @@ class wpdb {
 		} elseif ( ARRAY_N === $output ) {
 			return $this->last_result[ $y ] ? array_values( get_object_vars( $this->last_result[ $y ] ) ) : null;
 		} elseif ( OBJECT === strtoupper( $output ) ) {
-			// Back compat for OBJECT being previously case-insensitive.
 			return $this->last_result[ $y ] ? $this->last_result[ $y ] : null;
 		} else {
 			$this->print_error( ' $db->get_row(string query, output type, int offset) -- Output type must be one of: OBJECT, ARRAY_A, ARRAY_N' );
@@ -3099,16 +3055,9 @@ class wpdb {
 	 * @return array Database query result. Array indexed from 0 by SQL result row number.
 	 */
 	public function get_col( $query = null, $x = 0 ) {
-		if ( $query ) {
-			if ( $this->check_current_query && $this->check_safe_collation( $query ) ) {
-				$this->check_current_query = false;
-			}
-
-			$this->query( $query );
-		}
+		$this->maybe_run_query( $query );
 
 		$new_array = array();
-		// Extract the column values.
 		if ( $this->last_result ) {
 			for ( $i = 0, $j = count( $this->last_result ); $i < $j; $i++ ) {
 				$new_array[ $i ] = $this->get_var( null, $x, $i );
@@ -3138,56 +3087,72 @@ class wpdb {
 	public function get_results( $query = null, $output = OBJECT ) {
 		$this->func_call = "\$db->get_results(\"$query\", $output)";
 
-		if ( $query ) {
-			if ( $this->check_current_query && $this->check_safe_collation( $query ) ) {
-				$this->check_current_query = false;
-			}
-
-			$this->query( $query );
-		} else {
+		if ( ! $query ) {
 			return null;
 		}
 
-		$new_array = array();
+		$this->maybe_run_query( $query );
+
 		if ( OBJECT === $output ) {
-			// Return an integer-keyed array of row objects.
-			return $this->last_result;
-		} elseif ( OBJECT_K === $output ) {
-			/*
-			 * Return an array of row objects with keys from column 1.
-			 * (Duplicates are discarded.)
-			 */
-			if ( $this->last_result ) {
-				foreach ( $this->last_result as $row ) {
-					$var_by_ref = get_object_vars( $row );
-					$key        = array_shift( $var_by_ref );
-					if ( ! isset( $new_array[ $key ] ) ) {
-						$new_array[ $key ] = $row;
-					}
-				}
-			}
-			return $new_array;
-		} elseif ( ARRAY_A === $output || ARRAY_N === $output ) {
-			// Return an integer-keyed array of...
-			if ( $this->last_result ) {
-				if ( ARRAY_N === $output ) {
-					foreach ( (array) $this->last_result as $row ) {
-						// ...integer-keyed row arrays.
-						$new_array[] = array_values( get_object_vars( $row ) );
-					}
-				} else {
-					foreach ( (array) $this->last_result as $row ) {
-						// ...column name-keyed row arrays.
-						$new_array[] = get_object_vars( $row );
-					}
-				}
-			}
-			return $new_array;
-		} elseif ( strtoupper( $output ) === OBJECT ) {
-			// Back compat for OBJECT being previously case-insensitive.
 			return $this->last_result;
 		}
+
+		if ( OBJECT_K === $output ) {
+			return $this->format_results_object_k();
+		}
+
+		if ( ARRAY_A === $output || ARRAY_N === $output ) {
+			return $this->format_results_array( $output );
+		}
+
+		if ( strtoupper( $output ) === OBJECT ) {
+			return $this->last_result;
+		}
+
 		return null;
+	}
+
+	/**
+	 * Formats results as an object_k array.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @return array Array of row objects keyed by first column value.
+	 */
+	private function format_results_object_k() {
+		$new_array = array();
+		if ( $this->last_result ) {
+			foreach ( $this->last_result as $row ) {
+				$var_by_ref = get_object_vars( $row );
+				$key        = array_shift( $var_by_ref );
+				if ( ! isset( $new_array[ $key ] ) ) {
+					$new_array[ $key ] = $row;
+				}
+			}
+		}
+		return $new_array;
+	}
+
+	/**
+	 * Formats results as an array of arrays.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param string $output ARRAY_A or ARRAY_N.
+	 * @return array Array of rows.
+	 */
+	private function format_results_array( $output ) {
+		$new_array = array();
+		if ( $this->last_result ) {
+			foreach ( (array) $this->last_result as $row ) {
+				if ( ARRAY_N === $output ) {
+					$new_array[] = array_values( get_object_vars( $row ) );
+				} else {
+					$new_array[] = get_object_vars( $row );
+				}
+			}
+		}
+		return $new_array;
 	}
 
 	/**
@@ -3487,7 +3452,7 @@ class wpdb {
 		}
 
 		// We don't need to check the collation for queries that don't read data.
-		$query = ltrim( $query, "\r\n\t (" );
+		$query = ltrim( $query, WP_QUERY_TRIM_CHARS );
 		if ( preg_match( '/^(?:SHOW|DESCRIBE|DESC|EXPLAIN|CREATE)\s/i', $query ) ) {
 			return true;
 		}
@@ -3552,8 +3517,19 @@ class wpdb {
 	 *                        a WP_Error object is returned.
 	 */
 	protected function strip_invalid_text( $data ) {
-		$db_check_string = false;
+		$result = $this->strip_field_values( $data );
+		$data = $result['data'];
+		if ( $result['needs_db_check'] ) {
+			$data = $this->strip_invalid_text_db( $data );
+			if ( is_wp_error( $data ) ) {
+				return $data;
+			}
+		}
+		return $data;
+	}
 
+	private function strip_field_values( array $data ): array {
+		$db_check_string = false;
 		foreach ( $data as &$value ) {
 			$charset = $value['charset'];
 
@@ -3561,32 +3537,16 @@ class wpdb {
 				$length                  = $value['length']['length'];
 				$truncate_by_byte_length = 'byte' === $value['length']['type'];
 			} else {
-				$length = false;
-				/*
-				 * Since we have no length, we'll never truncate. Initialize the variable to false.
-				 * True would take us through an unnecessary (for this case) codepath below.
-				 */
+				$length                  = false;
 				$truncate_by_byte_length = false;
 			}
 
-			// There's no charset to work with.
-			if ( false === $charset ) {
-				continue;
-			}
-
-			// Column isn't a string.
-			if ( ! is_string( $value['value'] ) ) {
+			if ( false === $charset || ! is_string( $value['value'] ) ) {
 				continue;
 			}
 
 			$needs_validation = true;
-			if (
-				// latin1 can store any byte sequence.
-				'latin1' === $charset
-			||
-				// ASCII is always OK.
-				( ! isset( $value['ascii'] ) && $this->check_ascii( $value['value'] ) )
-			) {
+			if ( 'latin1' === $charset || ( ! isset( $value['ascii'] ) && $this->check_ascii( $value['value'] ) ) ) {
 				$truncate_by_byte_length = true;
 				$needs_validation        = false;
 			}
@@ -3597,101 +3557,91 @@ class wpdb {
 					$value['value'] = substr( $value['value'], 0, $length );
 				}
 				reset_mbstring_encoding();
-
 				if ( ! $needs_validation ) {
 					continue;
 				}
 			}
 
-			// utf8 can be handled by regex, which is a bunch faster than a DB lookup.
 			if ( ( 'utf8' === $charset || 'utf8mb3' === $charset || 'utf8mb4' === $charset ) && function_exists( 'mb_strlen' ) ) {
-				$regex = '/
-					(
-						(?: [\x00-\x7F]                  # single-byte sequences   0xxxxxxx
-						|   [\xC2-\xDF][\x80-\xBF]       # double-byte sequences   110xxxxx 10xxxxxx
-						|   \xE0[\xA0-\xBF][\x80-\xBF]   # triple-byte sequences   1110xxxx 10xxxxxx * 2
-						|   [\xE1-\xEC][\x80-\xBF]{2}
-						|   \xED[\x80-\x9F][\x80-\xBF]
-						|   [\xEE-\xEF][\x80-\xBF]{2}';
-
-				if ( 'utf8mb4' === $charset ) {
-					$regex .= '
-						|    \xF0[\x90-\xBF][\x80-\xBF]{2} # four-byte sequences   11110xxx 10xxxxxx * 3
-						|    [\xF1-\xF3][\x80-\xBF]{3}
-						|    \xF4[\x80-\x8F][\x80-\xBF]{2}
-					';
-				}
-
-				$regex         .= '){1,40}                          # ...one or more times
-					)
-					| .                                  # anything else
-					/x';
-				$value['value'] = preg_replace( $regex, '$1', $value['value'] );
-
-				if ( false !== $length && mb_strlen( $value['value'], 'UTF-8' ) > $length ) {
-					$value['value'] = mb_substr( $value['value'], 0, $length, 'UTF-8' );
-				}
+				$value['value'] = $this->strip_utf8_via_regex( $value['value'], $charset, $length );
 				continue;
 			}
 
-			// We couldn't use any local conversions, send it to the DB.
 			$value['db']     = true;
 			$db_check_string = true;
 		}
-		unset( $value ); // Remove by reference.
+		unset( $value );
+		return array( 'data' => $data, 'needs_db_check' => $db_check_string );
+	}
 
-		if ( $db_check_string ) {
-			$queries = array();
-			foreach ( $data as $col => $value ) {
-				if ( ! empty( $value['db'] ) ) {
-					// We're going to need to truncate by characters or bytes, depending on the length value we have.
-					if ( isset( $value['length']['type'] ) && 'byte' === $value['length']['type'] ) {
-						// Using binary causes LEFT() to truncate by bytes.
-						$charset = 'binary';
-					} else {
-						$charset = $value['charset'];
-					}
+	private function strip_utf8_via_regex( string $value, string $charset, $length ): string {
+		$regex = '/
+			(
+				(?: [\x00-\x7F]
+				|   [\xC2-\xDF][\x80-\xBF]
+				|   \xE0[\xA0-\xBF][\x80-\xBF]
+				|   [\xE1-\xEC][\x80-\xBF]{2}
+				|   \xED[\x80-\x9F][\x80-\xBF]
+				|   [\xEE-\xEF][\x80-\xBF]{2}';
 
-					if ( $this->charset ) {
-						$connection_charset = $this->charset;
-					} else {
-						$connection_charset = mysqli_character_set_name( $this->dbh );
-					}
+		if ( 'utf8mb4' === $charset ) {
+			$regex .= '
+				|    \xF0[\x90-\xBF][\x80-\xBF]{2}
+				|    [\xF1-\xF3][\x80-\xBF]{3}
+				|    \xF4[\x80-\x8F][\x80-\xBF]{2}
+			';
+		}
 
-					if ( is_array( $value['length'] ) ) {
-						$length          = sprintf( '%.0f', $value['length']['length'] );
-						$queries[ $col ] = $this->prepare( "CONVERT( LEFT( CONVERT( %s USING $charset ), $length ) USING $connection_charset )", $value['value'] );
-					} elseif ( 'binary' !== $charset ) {
-						// If we don't have a length, there's no need to convert binary - it will always return the same result.
-						$queries[ $col ] = $this->prepare( "CONVERT( CONVERT( %s USING $charset ) USING $connection_charset )", $value['value'] );
-					}
+		$regex .= '){1,40}
+			)
+			| .
+			/x';
+		$value = preg_replace( $regex, '$1', $value );
 
-					unset( $data[ $col ]['db'] );
+		if ( false !== $length && mb_strlen( $value, 'UTF-8' ) > $length ) {
+			$value = mb_substr( $value, 0, $length, 'UTF-8' );
+		}
+		return $value;
+	}
+
+	/**
+	 * @return array|WP_Error
+	 */
+	private function strip_invalid_text_db( array $data ) {
+		$queries = array();
+		foreach ( $data as $col => $value ) {
+			if ( ! empty( $value['db'] ) ) {
+				$charset = ( isset( $value['length']['type'] ) && 'byte' === $value['length']['type'] ) ? 'binary' : $value['charset'];
+				$connection_charset = $this->charset ? $this->charset : mysqli_character_set_name( $this->dbh );
+				if ( is_array( $value['length'] ) ) {
+					$length          = sprintf( '%.0f', $value['length']['length'] );
+					$queries[ $col ] = $this->prepare( "CONVERT( LEFT( CONVERT( %s USING $charset ), $length ) USING $connection_charset )", $value['value'] );
+				} elseif ( 'binary' !== $charset ) {
+					$queries[ $col ] = $this->prepare( "CONVERT( CONVERT( %s USING $charset ) USING $connection_charset )", $value['value'] );
 				}
-			}
-
-			$sql = array();
-			foreach ( $queries as $column => $query ) {
-				if ( ! $query ) {
-					continue;
-				}
-
-				$sql[] = $query . " AS x_$column";
-			}
-
-			$this->check_current_query = false;
-			$row                       = $this->get_row( 'SELECT ' . implode( ', ', $sql ), ARRAY_A );
-			if ( ! $row ) {
-				return new WP_Error( 'wpdb_strip_invalid_text_failure', __( 'Could not strip invalid text.' ) );
-			}
-
-			foreach ( array_keys( $data ) as $column ) {
-				if ( isset( $row[ "x_$column" ] ) ) {
-					$data[ $column ]['value'] = $row[ "x_$column" ];
-				}
+				unset( $data[ $col ]['db'] );
 			}
 		}
 
+		$sql = array();
+		foreach ( $queries as $column => $query ) {
+			if ( ! $query ) {
+				continue;
+			}
+			$sql[] = $query . " AS x_$column";
+		}
+
+		$this->check_current_query = false;
+		$row                       = $this->get_row( 'SELECT ' . implode( ', ', $sql ), ARRAY_A );
+		if ( ! $row ) {
+			return new WP_Error( 'wpdb_strip_invalid_text_failure', __( 'Could not strip invalid text.' ) );
+		}
+
+		foreach ( array_keys( $data ) as $column ) {
+			if ( isset( $row[ "x_$column" ] ) ) {
+				$data[ $column ]['value'] = $row[ "x_$column" ];
+			}
+		}
 		return $data;
 	}
 
@@ -3705,7 +3655,7 @@ class wpdb {
 	 */
 	protected function strip_invalid_text_from_query( $query ) {
 		// We don't need to check the collation for queries that don't read data.
-		$trimmed_query = ltrim( $query, "\r\n\t (" );
+		$trimmed_query = ltrim( $query, WP_QUERY_TRIM_CHARS );
 		if ( preg_match( '/^(?:SHOW|DESCRIBE|DESC|EXPLAIN|CREATE)\s/i', $trimmed_query ) ) {
 			return $query;
 		}
@@ -3793,7 +3743,7 @@ class wpdb {
 		$query = rtrim( $query, ';/-#' );
 
 		// Allow (select...) union [...] style queries. Use the first query's table name.
-		$query = ltrim( $query, "\r\n\t (" );
+		$query = ltrim( $query, WP_QUERY_TRIM_CHARS );
 
 		// Strip everything between parentheses except nested selects.
 		$query = preg_replace( '/\((?!\s*select)[^(]*?\)/is', '()', $query );
