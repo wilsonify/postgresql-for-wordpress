@@ -58,7 +58,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = $this->convertToPostgresLimitSyntax($sql);
         $sql = $this->ensureGroupByOrAggregate($sql);
 
-        $pattern = '/DATE_ADD[ ]*\(([^,]+),([^\)]+)\)/';
+        $pattern = '/DATE_ADD\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i';
         $sql = preg_replace($pattern, '($1 + $2)', $sql);
 
         // Convert MySQL FIELD function to CASE statement
@@ -100,8 +100,8 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = str_replace('FROM \'' . $curryear, 'FROM TIMESTAMP \'' . $curryear, $sql);
 
         // MySQL 'IF' conversion - Note : NULLIF doesn't need to be corrected
-        $pattern = '/ (?<!NULL)IF[ ]*\(([^,]+),([^,]+),([^\)]+)\)/';
-        $sql = preg_replace($pattern, ' CASE WHEN $1 THEN $2 ELSE $3 END', $sql);
+        $pattern = '/(?<!NULL)IF\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i';
+        $sql = preg_replace($pattern, 'CASE WHEN $1 THEN $2 ELSE $3 END', $sql);
 
         // Act like MySQL default configuration, where sql_mode is ""
         $pattern = '/@@SESSION.sql_mode/';
@@ -113,7 +113,8 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = str_replace("!= ''", '<> 0', $sql);
 
         // MySQL 'LIKE' is case insensitive by default, whereas PostgreSQL 'LIKE' is
-        $sql = str_replace(' LIKE ', ' ILIKE ', $sql);
+        // Use word-boundary regex to match LIKE with any surrounding whitespace
+        $sql = preg_replace('/\s+LIKE\s+/i', ' ILIKE ', $sql);
 
         // INDEXES are not yet supported
         if(false !== strpos($sql, 'USE INDEX (comment_date_gmt)')) {
@@ -256,6 +257,12 @@ class SelectSQLRewriter extends AbstractSQLRewriter
     {
         // Check for system or session variables
         if (preg_match('/@@[a-zA-Z0-9_]+/', $sql)) {
+            return $sql;
+        }
+
+        // Skip queries with subqueries — the simple regex parser below cannot
+        // handle nested SELECT/WHERE clauses and would corrupt the query.
+        if (preg_match('/\bSELECT\b.*\bFROM\b.*\bSELECT\b/is', $sql)) {
             return $sql;
         }
 

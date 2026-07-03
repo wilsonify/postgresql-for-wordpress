@@ -11,6 +11,29 @@ class InsertSQLRewriter extends AbstractSQLRewriter
         $sql = str_replace('(0,', "('0',", $sql);
         $sql = str_replace('(1,', "('1',", $sql);
 
+        // Convert MySQL INSERT ... SET syntax to INSERT ... (col, ...) VALUES (val, ...)
+        if (1 === preg_match('/^INSERT\s+INTO\s+(.+?)\s+SET\s+(.+)$/is', $sql, $m)) {
+            $table = $m[1];
+            $setClause = $m[2];
+            $pairs = explode(',', $setClause);
+            $cols = [];
+            $vals = [];
+            foreach ($pairs as $pair) {
+                $pair = trim($pair);
+                $eqPos = strpos($pair, '=');
+                if ($eqPos !== false) {
+                    $cols[] = trim(substr($pair, 0, $eqPos));
+                    $vals[] = trim(substr($pair, $eqPos + 1));
+                }
+            }
+            $sql = sprintf(
+                'INSERT INTO %s (%s) VALUES (%s)',
+                $table,
+                implode(', ', $cols),
+                implode(', ', $vals)
+            );
+        }
+
         // Fix inserts into wp_categories
         if(false !== strpos($sql, 'INSERT INTO ' . $wpdb->categories)) {
             $sql = str_replace('"cat_ID",', '', $sql);

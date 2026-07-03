@@ -27,6 +27,28 @@ $GLOBALS['pg4wp_connstr'] = '';
 $GLOBALS['pg4wp_conn'] = false;
 
 /**
+ * Lightweight container for prepared statement state.
+ *
+ * Mimics the mysqli_stmt object interface so that plugins/tools
+ * using MySQLi prepared statements (wpsqli_prepare, wpsqli_stmt_*)
+ * can operate against PostgreSQL without crashing.
+ */
+class pg4wp_stmt
+{
+    public $connection;
+    public $name;
+    public $sql;
+    public $params = [];
+    public $paramTypes = '';
+    public $result;
+    public $boundResult = [];
+    public $error = '';
+    public $errno = 0;
+    public $fetchedRow = null;
+    public $fetchIndex = 0;
+}
+
+/**
 * Connection Handling
 */
 
@@ -358,7 +380,10 @@ function wpsqli_options(&$connection, $option, $value)
  */
 function wpsqli_connect_errno()
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
+    if ($GLOBALS['pg4wp_conn']) {
+        return 0;
+    }
+    return 1;
 }
 
 /**
@@ -404,7 +429,8 @@ function wpsqli_autocommit(&$connection, $mode)
 {
     // mysqli_autocommit => pg_autocommit (resource $connection, bool $mode): bool
     // PostgreSQL autocommit behavior is typically managed at the transaction level.
-    pg_query($connection, "SET AUTOCOMMIT TO ON");
+    pg_query($connection, "SET AUTOCOMMIT TO " . ($mode ? 'ON' : 'OFF'));
+    return true;
 }
 
 /**
@@ -569,7 +595,28 @@ function wpsqli_prepare(&$connection, $query)
     $initial = $query;
     // Rewrite the SQL query for compatibility with Postgres
     $sql = pg4wp_rewrite($query);
-    throw new \Exception("PG4WP: Not Yet Implemented");
+
+    // Convert ? placeholders to $N for PostgreSQL
+    $stmtName = 'pg4wp_stmt_' . md5($sql . microtime(true));
+    $paramCount = 0;
+    $pgSql = preg_replace_callback('/\?/', function ($m) use (&$paramCount) {
+        $paramCount++;
+        return '$' . $paramCount;
+    }, $sql);
+
+    $stmt = new pg4wp_stmt();
+    $stmt->connection = $connection;
+    $stmt->name = $stmtName;
+    $stmt->sql = $pgSql;
+
+    // Prepare the statement
+    $result = @pg_prepare($connection, $stmtName, $pgSql);
+    if ($result === false) {
+        $stmt->error = pg_last_error($connection);
+        return false;
+    }
+
+    return $stmt;
     // mysqli_prepare => pg_prepare (resource $connection, string $stmtname, string $query): resource
     // pg_prepare($connection, "my_query", "SELECT * FROM my_table WHERE id = $1");
 }
@@ -588,14 +635,22 @@ function wpsqli_prepare(&$connection, $query)
  */
 function wpsqli_stmt_execute($stmt)
 {
-    // Store the initial SQL query
-    $initial = $stmt;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($stmt);
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_stmt_execute => pg_execute (resource $connection, string $stmtname, array $params): resource
-    // Executes a previously prepared statement.
-    // pg_execute($connection, "my_query", array("my_id"));
+    if (!($stmt instanceof pg4wp_stmt)) {
+        return false;
+    }
+
+    $result = @pg_execute($stmt->connection, $stmt->name, $stmt->params);
+    if ($result === false) {
+        $stmt->error = pg_last_error($stmt->connection);
+        $stmt->errno = 1;
+        return false;
+    }
+
+    $stmt->result = $result;
+    $stmt->fetchedRow = null;
+    $stmt->fetchIndex = 0;
+    $GLOBALS['pg4wp_result'] = $result;
+    return true;
 }
 
 /**
@@ -615,13 +670,13 @@ function wpsqli_stmt_execute($stmt)
  */
 function wpsqli_stmt_bind_param($stmt, $types, ...$vars)
 {
-    // Store the initial SQL query
-    $initial = $stmt;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($stmt);
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // The remaining mysqli_stmt_* functions do not have direct equivalents in PostgreSQL. Prepared statements work differently.
-    // PostgreSQL uses pg_prepare() and pg_execute() for prepared statements. Results are then fetched with pg_fetch_* functions.
+    if (!($stmt instanceof pg4wp_stmt)) {
+        return false;
+    }
+
+    $stmt->paramTypes = $types;
+    $stmt->params = $vars;
+    return true;
 }
 
 /**
@@ -639,13 +694,15 @@ function wpsqli_stmt_bind_param($stmt, $types, ...$vars)
  */
 function wpsqli_stmt_bind_result($stmt, &...$vars)
 {
-    // Store the initial SQL query
-    $initial = $stmt;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($stmt);
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // The remaining mysqli_stmt_* functions do not have direct equivalents in PostgreSQL. Prepared statements work differently.
-    // PostgreSQL uses pg_prepare() and pg_execute() for prepared statements. Results are then fetched with pg_fetch_* functions.
+    if (!($stmt instanceof pg4wp_stmt)) {
+        return false;
+    }
+
+    $stmt->boundResult = [];
+    foreach ($vars as $i => &$var) {
+        $stmt->boundResult[$i] = &$var;
+    }
+    return true;
 }
 
 /**
@@ -661,9 +718,24 @@ function wpsqli_stmt_bind_result($stmt, &...$vars)
  */
 function wpsqli_stmt_fetch($stmt)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // The remaining mysqli_stmt_* functions do not have direct equivalents in PostgreSQL. Prepared statements work differently.
-    // PostgreSQL uses pg_prepare() and pg_execute() for prepared statements. Results are then fetched with pg_fetch_* functions.
+    if (!($stmt instanceof pg4wp_stmt) || $stmt->result === null) {
+        return false;
+    }
+
+    $row = pg_fetch_array($stmt->result, null, PGSQL_NUM);
+    if ($row === false) {
+        return null;
+    }
+
+    // Populate bound result references
+    $stmt->fetchedRow = $row;
+    foreach ($stmt->boundResult as $i => &$var) {
+        if (isset($row[$i])) {
+            $var = $row[$i];
+        }
+    }
+    $stmt->fetchIndex++;
+    return true;
 }
 
 /**
@@ -680,9 +752,9 @@ function wpsqli_stmt_fetch($stmt)
  */
 function wpsqli_stmt_init(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_stmt_init => No direct equivalent in PostgreSQL.
-    // In PostgreSQL, prepared statements are created directly with pg_prepare, not initialized separately.
+    $stmt = new pg4wp_stmt();
+    $stmt->connection = $connection;
+    return $stmt;
 }
 
 
@@ -699,13 +771,16 @@ function wpsqli_stmt_init(&$connection)
  */
 function wpsqli_stmt_close($stmt)
 {
-    // Store the initial SQL query
-    $initial = $stmt;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($stmt);
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // The remaining mysqli_stmt_* functions do not have direct equivalents in PostgreSQL. Prepared statements work differently.
-    // PostgreSQL uses pg_prepare() and pg_execute() for prepared statements. Results are then fetched with pg_fetch_* functions.
+    if (!($stmt instanceof pg4wp_stmt)) {
+        return false;
+    }
+
+    if ($stmt->result) {
+        @pg_free_result($stmt->result);
+    }
+    @pg_query($stmt->connection, 'DEALLOCATE "' . $stmt->name . '"');
+
+    return true;
 }
 
 /**
@@ -722,13 +797,10 @@ function wpsqli_stmt_close($stmt)
  */
 function wpsqli_stmt_error($stmt)
 {
-    // Store the initial SQL query
-    $initial = $stmt;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($stmt);
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // The remaining mysqli_stmt_* functions do not have direct equivalents in PostgreSQL. Prepared statements work differently.
-    // PostgreSQL uses pg_prepare() and pg_execute() for prepared statements. Results are then fetched with pg_fetch_* functions.
+    if ($stmt instanceof pg4wp_stmt) {
+        return $stmt->error;
+    }
+    return '';
 }
 
 /**
@@ -745,13 +817,10 @@ function wpsqli_stmt_error($stmt)
  */
 function wpsqli_stmt_errno($stmt)
 {
-    // Store the initial SQL query
-    $initial = $stmt;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($stmt);
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // The remaining mysqli_stmt_* functions do not have direct equivalents in PostgreSQL. Prepared statements work differently.
-    // PostgreSQL uses pg_prepare() and pg_execute() for prepared statements. Results are then fetched with pg_fetch_* functions.
+    if ($stmt instanceof pg4wp_stmt) {
+        return $stmt->errno;
+    }
+    return 0;
 }
 
 /**
@@ -909,10 +978,35 @@ function wpsqli_data_seek($result, int $row_number): bool
  */
 function wpsqli_fetch_field($result)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_fetch_field => pg_field_table (resource $result, int $field_number, bool $oid_only = false): mixed
-    // Returns the name or oid of the table of the field. There's no direct function to mimic mysqli_fetch_field completely.
-    //pg_field_table($result, $field_number);
+    if ($result === false) {
+        return false;
+    }
+
+    static $fieldIndex = [];
+    $resId = (int)$result;
+
+    if (!isset($fieldIndex[$resId])) {
+        $fieldIndex[$resId] = 0;
+    }
+
+    $numFields = pg_num_fields($result);
+    if ($fieldIndex[$resId] >= $numFields) {
+        $fieldIndex[$resId] = 0;
+        return false;
+    }
+
+    $i = $fieldIndex[$resId];
+    $fieldIndex[$resId]++;
+
+    $field = new stdClass();
+    $field->name = pg_field_name($result, $i);
+    $field->table = pg_field_table($result, $i);
+    $field->type = pg_field_type($result, $i);
+    $field->max_length = pg_field_size($result, $i);
+    $field->flags = 0;
+    $field->def = '';
+
+    return $field;
 }
 
 /**
@@ -971,10 +1065,9 @@ function wpsqli_field_count(&$connection)
  */
 function wpsqli_store_result(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_store_result => Not needed in PostgreSQL.
-    // PostgreSQL's pg_query automatically stores the results without a separate call.
-    //return true;
+    // pg_query already stores results client-side; return the latest result.
+    $result = $GLOBALS['pg4wp_result'] ?? null;
+    return $result ? $result : false;
 }
 
 /**
@@ -992,9 +1085,9 @@ function wpsqli_store_result(&$connection)
  */
 function wpsqli_use_result(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_use_result => Not needed in PostgreSQL.
-    // PostgreSQL does not differentiate between unbuffered and buffered queries like MySQL does.
+    // PostgreSQL does not differentiate unbuffered/buffered; same as store_result.
+    $result = $GLOBALS['pg4wp_result'] ?? null;
+    return $result ? $result : false;
 }
 
 /**
@@ -1018,6 +1111,20 @@ function wpsqli_free_result($result)
     // mysqli_free_result => pg_free_result (resource $result): bool
     // Frees memory associated with a result.
     pg_free_result($result);
+}
+
+/**
+ * Gets the number of rows in a result set.
+ *
+ * @param \PgSql\Result $result The result set returned by pg_query.
+ * @return int|false Number of rows on success, FALSE on failure.
+ */
+function wpsqli_num_rows($result)
+{
+    if ($result === false || $result === null) {
+        return 0;
+    }
+    return pg_num_rows($result);
 }
 
 /**

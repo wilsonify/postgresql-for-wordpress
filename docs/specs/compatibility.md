@@ -178,7 +178,7 @@ Each section documents: MariaDB behavior, PostgreSQL behavior, expected translat
 | Feature | MariaDB | PostgreSQL | Translation | Limitations | Verification |
 |---------|---------|------------|-------------|-------------|--------------|
 | LIMIT m,n | `LIMIT 0, 10` | `LIMIT 10 OFFSET 0` | Rewritten | None | Stub test |
-| INSERT ... SET | `INSERT t SET col=val` | Not supported | Not implemented | Plugins using this syntax fail | Stub test (known gap) |
+| INSERT ... SET | `INSERT t SET col=val` | Not supported | Converted to INSERT ... (col) VALUES (val) | None | Stub test |
 | INSERT IGNORE | `INSERT IGNORE` | No IGNORE | INSERT → ON CONFLICT DO NOTHING | None | Stub test |
 | ON DUPLICATE KEY | `ON DUPLICATE KEY UPDATE col=val` | `ON CONFLICT (col) DO UPDATE SET col=val` | Rewritten | Conflict target detection may be incorrect for composite unique keys | Stub test |
 | REPLACE INTO | `REPLACE INTO t VALUES (...)` | No REPLACE | INSERT → ON CONFLICT DO UPDATE | Requires unique constraint | Stub test |
@@ -206,7 +206,7 @@ Each section documents: MariaDB behavior, PostgreSQL behavior, expected translat
 | Feature | MariaDB | PostgreSQL | Translation | Limitations | Verification |
 |---------|---------|------------|-------------|-------------|--------------|
 | Placeholder syntax | `?` (positional) | `$1`, `$2` (numbered) | `?` → `$N` conversion needed | Must not convert `?` inside string literals | Integration test |
-| Prepare/Execute | `PREPARE stmt FROM ...` / `EXECUTE stmt` | `PREPARE stmt AS ...` / `EXECUTE stmt` | 9 MySQLi stmt functions must be implemented | Some plugins use MySQLi stmt API directly; WordPress uses `$wpdb->prepare()` | Integration test |
+| Prepare/Execute | `PREPARE stmt FROM ...` / `EXECUTE stmt` | `PREPARE stmt AS ...` / `EXECUTE stmt` | Implemented via `pg4wp_stmt` class | Placeholder conversion `?`→`$N` may need refinement for edge cases | Integration test |
 
 ---
 
@@ -248,19 +248,19 @@ Each section documents: MariaDB behavior, PostgreSQL behavior, expected translat
 
 | Gap | Impact | Affected Requirement |
 |-----|--------|---------------------|
-| GROUP BY with nested WHERE subqueries loses WHERE clause | Complex queries return all rows instead of filtered set | FR-05 (content queries) |
-| INSERT ... SET syntax not supported | Plugins using this MySQL-specific syntax fail | FR-14 (plugin SQL handling) |
-| Date function rewrites (YEAR/MONTH) corrupt complex queries | Archive pages, admin date filters return wrong data | FR-11 (date-based queries) |
+| GROUP BY with nested WHERE subqueries detected and skipped | Subquery queries bypass auto-GROUP-BY; may need manual GROUP BY | FR-05 (content queries) |
+| INSERT ... SET syntax supported | Plugins using this MySQL-specific syntax converted | FR-14 — Resolved |
+| Date function rewrites (YEAR/MONTH) improved for nested parens | Complex date queries with nested function calls handled correctly | FR-11 — Resolved |
 | FOUND_ROWS() race condition | Pagination counts wrong under concurrent load | FR-05 (pagination) |
-| Prepared statement stubs not implemented | Plugins using MySQLi stmt API fail | FR-14 (plugin SQL handling) |
+| Prepared statement stubs implemented | MySQLi stmt API (`pg4wp_stmt`) operational for common use cases | FR-14 — Resolved |
 
 ### 5.2 High (Should Resolve)
 
 | Gap | Impact | Affected Requirement |
 |-----|--------|---------------------|
-| FROM DUAL not stripped | Some plugins fail on SELECT-only queries | FR-14 |
+| FROM DUAL stripped | SELECT-only queries from MySQL work | FR-14 — Resolved |
 | GET_LOCK/RELEASE_LOCK missing | WooCommerce and SEO plugin lock operations fail | FR-14, FR-29 |
-| Remaining driver function stubs (14 functions) | Plugins using certain MySQLi API functions fail | FR-14 |
+| Remaining driver function stubs (7 functions) | Plugins using certain MySQLi API functions fail (wpsqli_info, wpsqli_host_info, wpsqli_thread_id, wpsqli_thread_safe, wpsqli_stat, wpsqli_options, wpsqli_poll, wpsqli_reap_async_query) | FR-14 |
 
 ### 5.3 Lower Priority (Future Phases)
 

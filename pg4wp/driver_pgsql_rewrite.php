@@ -66,6 +66,7 @@ function pg4wp_rewrite($sql)
     }
 
     $sql = correctMetaValue($sql);
+    $sql = stripFromDual($sql);
     $sql = handleInterval($sql);
     $sql = cleanAndCapitalize($sql);
     $sql = correctEmptyInStatements($sql);
@@ -126,6 +127,17 @@ function correctMetaValue($sql)
 }
 
 /**
+ * Strip MySQL/Oracle FROM DUAL (PostgreSQL has no DUAL table).
+ *
+ * @param string $sql SQL query string
+ * @return string Modified SQL query string
+ */
+function stripFromDual($sql)
+{
+    return preg_replace('/\s+FROM\s+DUAL(\s+|$)/i', '$1', $sql);
+}
+
+/**
  * Handle interval expressions in SQL query.
  *
  * @param string $sql SQL query string
@@ -135,8 +147,12 @@ function handleInterval($sql)
 {
     // Generic "INTERVAL xx YEAR|MONTH|DAY|HOUR|MINUTE|SECOND" handler
     $sql = preg_replace('/INTERVAL[ ]+(\d+)[ ]+(YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)/', "'\$1 \$2'::interval", $sql);
-    // DATE_SUB handling
-    $sql = preg_replace('/DATE_SUB[ ]*\(([^,]+),([^\)]+)\)/', '($1::timestamp - $2)', $sql);
+    // DATE_SUB handling with balanced-parentheses support for first argument
+    $sql = preg_replace_callback('/DATE_SUB\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i', function ($m) {
+        $arg1 = trim($m[1]);
+        $arg2 = trim($m[2]);
+        return '(' . $arg1 . '::timestamp - ' . $arg2 . ')';
+    }, $sql);
     return $sql;
 }
 
