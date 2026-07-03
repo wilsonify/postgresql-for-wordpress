@@ -1,0 +1,1 @@
+{"mysql":"INSERT INTO wp_aioseo_cache SET `key` = 'val', `value` = 'b:1;'","postgresql":"INSERT INTO wp_aioseo_cache (key, value) VALUES ('val', 'b:1;') RETURNING *;"}

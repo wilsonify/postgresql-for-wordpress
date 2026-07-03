@@ -33,11 +33,24 @@ class ShowVariablesSQLRewriter extends AbstractSQLRewriter
     public function generatePostgres($sql, $variableName)
     {
         if ($variableName == "sql_mode") {
-            // Act like MySQL default configuration, where sql_mode is ""
             return "SELECT '$variableName' AS \"Variable_name\", '' AS \"Value\";";
         }
 
-        // return untransformed sql
+        $hardcoded = [
+            'character_set_database' => 'utf8',
+            'collation_database' => 'en_US.UTF-8',
+            'character_set_server' => 'utf8',
+            'collation_server' => 'en_US.UTF-8',
+            'max_allowed_packet' => '1073741824',
+            'max_execution_time' => '30000',
+            'innodb_lock_wait_timeout' => '50',
+            'wait_timeout' => '28800',
+        ];
+
+        if (isset($hardcoded[$variableName])) {
+            return "SELECT '$variableName' AS \"Variable_name\", '{$hardcoded[$variableName]}' AS \"Value\";";
+        }
+
         return $sql;
     }
 }

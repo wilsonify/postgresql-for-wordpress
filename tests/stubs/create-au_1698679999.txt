@@ -1,0 +1,1 @@
+{"mysql":"CREATE TABLE wp_test2 (ID INT AUTO_INCREMENT, name VARCHAR(255))","postgresql":"CREATE TABLE wp_test2 ( \"ID\" INT DEFAULT nextval('wp_test2_seq'::text), name VARCHAR(255));\nCREATE SEQUENCE IF NOT EXISTS wp_test2_seq;"}

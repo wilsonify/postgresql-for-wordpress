@@ -1,0 +1,1 @@
+{"mysql":"CREATE TABLE wp_aioseo_notifications ( `default` timestamp NULL, `end` timestamp NULL )","postgresql":"CREATE TABLE wp_aioseo_notifications ( \"default\" timestamp NULL, \"end\" timestamp NULL );"}

@@ -142,6 +142,12 @@ class InsertSQLRewriter extends AbstractSQLRewriter
             $sql = utf8_encode($sql);
         }
 
+        // Append RETURNING * for INSERT ID retrieval
+        if (false === strpos($sql, 'RETURNING')) {
+            $sql = rtrim($sql, "; \t\n\r\0\x0B");
+            $sql .= ' RETURNING *;';
+        }
+
         return $sql;
     }
 }

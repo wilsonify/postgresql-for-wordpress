@@ -43,65 +43,30 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         // Handle CAST( ... AS SIGNED)
         $sql = preg_replace('/CAST\((.+) AS SIGNED\)/', 'CAST($1 AS INTEGER)', $sql);
 
-        // Handle COUNT(*)...ORDER BY...
-        $sql = preg_replace('/COUNT(.+)ORDER BY.+/s', 'COUNT$1', $sql);
+        // Handle COUNT(...) ORDER BY ... (only when ORDER BY directly follows COUNT, no intervening FROM)
+        $sql = preg_replace('/(COUNT\s*\([^)]*\))\s+ORDER\s+BY\s+.+$/im', '$1', $sql);
 
         // In order for users counting to work...
-        $matches = array();
-        if(preg_match_all('/COUNT[^C]+\),/', $sql, $matches)) {
-            foreach($matches[0] as $num => $one) {
-                $sub = substr($one, 0, -1);
-                $sql = str_replace($sub, $sub . ' AS count' . $num, $sql);
+        // Only apply within the SELECT clause to avoid corrupting GROUP BY
+        $selPattern = '/^\s*SELECT\s+(.*?)\s+FROM\s+/is';
+        if (preg_match($selPattern, $sql, $selMatches)) {
+            $selectPart = $selMatches[1];
+            $matches = array();
+            if(preg_match_all('/COUNT[^C]+\),/', $selectPart, $matches)) {
+                foreach($matches[0] as $num => $one) {
+                    $sub = substr($one, 0, -1);
+                    $selectPart = str_replace($sub, $sub . ' AS count' . $num, $selectPart);
+                }
             }
+            $sql = str_replace($selMatches[1], $selectPart, $sql);
         }
+
+        // Apply MySQL function conversions BEFORE clause-parsing to avoid
+        // clause corruption from function rewrites that change column patterns.
+        $sql = $this->applyMySqlFunctionConversions($sql);
 
         $sql = $this->convertToPostgresLimitSyntax($sql);
         $sql = $this->ensureGroupByOrAggregate($sql);
-
-        $pattern = '/DATE_ADD\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i';
-        $sql = preg_replace($pattern, '($1 + $2)', $sql);
-
-        // Convert MySQL FIELD function to CASE statement
-        $pattern = '/FIELD[ ]*\(([^\),]+),([^\)]+)\)/';
-        // https://dev.mysql.com/doc/refman/5.7/en/string-functions.html#function_field
-        // Other implementations:  https://stackoverflow.com/q/1309624
-        $sql = preg_replace_callback($pattern, function ($matches) {
-            $case = 'CASE ' . trim($matches[1]);
-            $comparands = explode(',', $matches[2]);
-            foreach($comparands as $i => $comparand) {
-                $case .= ' WHEN ' . trim($comparand) . ' THEN ' . ($i + 1);
-            }
-            $case .= ' ELSE 0 END';
-            return $case;
-        }, $sql);
-
-        $pattern = '/GROUP_CONCAT\(([^()]*(\(((?>[^()]+)|(?-2))*\))?[^()]*)\)/x';
-        $sql = preg_replace($pattern, "string_agg($1, ',')", $sql);
-
-        // Convert MySQL RAND function to PostgreSQL RANDOM function
-        $pattern = '/RAND[ ]*\([ ]*\)/';
-        $sql = preg_replace($pattern, 'RANDOM()', $sql);
-
-        // UNIX_TIMESTAMP in MYSQL returns an integer
-        $pattern = '/UNIX_TIMESTAMP\(([^\)]+)\)/';
-        $sql = preg_replace($pattern, 'ROUND(DATE_PART(\'epoch\',$1))', $sql);
-
-        $date_funcs = array(
-            'DAYOFMONTH('    => 'EXTRACT(DAY FROM ',
-            'YEAR('            => 'EXTRACT(YEAR FROM ',
-            'MONTH('        => 'EXTRACT(MONTH FROM ',
-            'DAY('            => 'EXTRACT(DAY FROM ',
-        );
-
-        $sql = str_replace('ORDER BY post_date DESC', 'ORDER BY YEAR(post_date) DESC, MONTH(post_date) DESC', $sql);
-        $sql = str_replace('ORDER BY post_date ASC', 'ORDER BY YEAR(post_date) ASC, MONTH(post_date) ASC', $sql);
-        $sql = str_replace(array_keys($date_funcs), array_values($date_funcs), $sql);
-        $curryear = date('Y');
-        $sql = str_replace('FROM \'' . $curryear, 'FROM TIMESTAMP \'' . $curryear, $sql);
-
-        // MySQL 'IF' conversion - Note : NULLIF doesn't need to be corrected
-        $pattern = '/(?<!NULL)IF\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i';
-        $sql = preg_replace($pattern, 'CASE WHEN $1 THEN $2 ELSE $3 END', $sql);
 
         // Act like MySQL default configuration, where sql_mode is ""
         $pattern = '/@@SESSION.sql_mode/';
@@ -255,21 +220,16 @@ class SelectSQLRewriter extends AbstractSQLRewriter
      */
     protected function ensureGroupByOrAggregate(string $sql): string
     {
-        // Check for system or session variables
         if (preg_match('/@@[a-zA-Z0-9_]+/', $sql)) {
             return $sql;
         }
 
-        // Skip queries with subqueries — the simple regex parser below cannot
-        // handle nested SELECT/WHERE clauses and would corrupt the query.
         if (preg_match('/\bSELECT\b.*\bFROM\b.*\bSELECT\b/is', $sql)) {
             return $sql;
         }
 
-        // Regular expression to capture main SQL components.
-        $regex = '/(SELECT\s+)(.*?)(\s+FROM\s+)([^ ]+)(\s+WHERE\s+.*?(?= ORDER BY | GROUP BY | LIMIT |$))?(ORDER BY.*?(?= LIMIT |$))?(LIMIT.*?$)?/is';
+        $regex = '/\A(SELECT\s+)(.*?)(\s+FROM\s+)((?:\w+(?:\s*\w+)*\s*(?:INNER|LEFT|RIGHT|CROSS|JOIN|,\s*\w+)*\s*\w*))(\s+WHERE\s+.*?)?(\s+GROUP\s+BY\s+.*?)?(\s+HAVING\s+.*?)?(\s+ORDER\s+BY\s+.*?)?(\s+LIMIT\s+.*?)?\Z/is';
 
-        // Capture main SQL components using regex
         if (!preg_match($regex, $sql, $matches)) {
             return $sql;
         }
@@ -277,23 +237,22 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $selectClause = trim($matches[2] ?? '');
         $fromClause = trim($matches[4] ?? '');
         $whereClause = trim($matches[5] ?? '');
-        $orderClause = trim($matches[6] ?? '');
-        $limitClause = trim($matches[7] ?? '');
+        $groupClause = trim($matches[6] ?? '');
+        $havingClause = trim($matches[7] ?? '');
+        $orderClause = trim($matches[8] ?? '');
+        $limitClause = trim($matches[9] ?? '');
 
         if (empty($selectClause) || empty($fromClause)) {
             return $sql;
         }
 
-        // Regular expression to match commas not within parentheses
         $pattern = '/,(?![^\(]*\))/';
-        // Split columns using a comma, and then trim each element
         $columns = array_map('trim', preg_split($pattern, $selectClause));
 
         $aggregateColumns = [];
         $nonAggregateColumns = [];
 
         foreach ($columns as $col) {
-            // Check for aggregate functions in the column
             if (preg_match('/(COUNT|SUM|AVG|MIN|MAX)\s*?\(/i', $col)) {
                 $aggregateColumns[] = $col;
             } else {
@@ -301,33 +260,82 @@ class SelectSQLRewriter extends AbstractSQLRewriter
             }
         }
 
-        // Only add a GROUP BY clause if there are both aggregate and non-aggregate columns in SELECT
         if (empty($aggregateColumns) || empty($nonAggregateColumns)) {
             return $sql;
         }
 
-
-        // Assemble new SQL query
         $postgresSql = "SELECT $selectClause FROM $fromClause";
 
         if (!empty($whereClause)) {
-            $postgresSql .= ' ' . $whereClause;
+            $postgresSql .= " $whereClause";
         }
 
-        $groupByClause = "GROUP BY " . implode(", ", $nonAggregateColumns);
-        if (!empty($groupByClause)) {
-            $postgresSql .= ' ' . $groupByClause;
+        if (!empty($groupClause)) {
+            $postgresSql .= " $groupClause";
+        } elseif (!empty($nonAggregateColumns)) {
+            $postgresSql .= ' GROUP BY ' . implode(", ", $nonAggregateColumns);
+        }
+
+        if (!empty($havingClause)) {
+            $postgresSql .= " $havingClause";
         }
 
         if (!empty($orderClause)) {
-            $postgresSql .= ' ' . $orderClause;
+            $postgresSql .= " $orderClause";
         }
 
         if (!empty($limitClause)) {
-            $postgresSql .= ' ' . $limitClause;
+            $postgresSql .= " $limitClause";
         }
 
         return $postgresSql;
+    }
+
+    protected function applyMySqlFunctionConversions(string $sql): string
+    {
+        $pattern = '/DATE_ADD\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i';
+        $sql = preg_replace($pattern, '($1 + $2)', $sql);
+
+        $pattern = '/DATE_SUB\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i';
+        $sql = preg_replace($pattern, '($1::timestamp - $2)', $sql);
+
+        $pattern = '/FIELD[ ]*\(([^\),]+),([^\)]+)\)/';
+        $sql = preg_replace_callback($pattern, function ($matches) {
+            $case = 'CASE ' . trim($matches[1]);
+            $comparands = explode(',', $matches[2]);
+            foreach ($comparands as $i => $comparand) {
+                $case .= ' WHEN ' . trim($comparand) . ' THEN ' . ($i + 1);
+            }
+            $case .= ' ELSE 0 END';
+            return $case;
+        }, $sql);
+
+        $pattern = '/GROUP_CONCAT\(([^()]*(\(((?>[^()]+)|(?-2))*\))?[^()]*)\)/x';
+        $sql = preg_replace($pattern, "string_agg($1, ',')", $sql);
+
+        $pattern = '/RAND[ ]*\([ ]*\)/';
+        $sql = preg_replace($pattern, 'RANDOM()', $sql);
+
+        $pattern = '/UNIX_TIMESTAMP\(([^\)]+)\)/';
+        $sql = preg_replace($pattern, 'ROUND(DATE_PART(\'epoch\',$1))', $sql);
+
+        $date_funcs = [
+            'DAYOFMONTH(' => 'EXTRACT(DAY FROM ',
+            'YEAR('       => 'EXTRACT(YEAR FROM ',
+            'MONTH('      => 'EXTRACT(MONTH FROM ',
+            'DAY('        => 'EXTRACT(DAY FROM ',
+        ];
+
+        $sql = str_replace('ORDER BY post_date DESC', 'ORDER BY YEAR(post_date) DESC, MONTH(post_date) DESC', $sql);
+        $sql = str_replace('ORDER BY post_date ASC', 'ORDER BY YEAR(post_date) ASC, MONTH(post_date) ASC', $sql);
+        $sql = str_replace(array_keys($date_funcs), array_values($date_funcs), $sql);
+        $curryear = date('Y');
+        $sql = str_replace('FROM \'' . $curryear, 'FROM TIMESTAMP \'' . $curryear, $sql);
+
+        $pattern = '/(?<!NULL)IF\s*\(((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\s*,\s*((?:[^()]+|\([^()]*\))*)\)/i';
+        $sql = preg_replace($pattern, 'CASE WHEN $1 THEN $2 ELSE $3 END', $sql);
+
+        return $sql;
     }
 
     /**

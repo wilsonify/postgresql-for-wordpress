@@ -1,0 +1,1 @@
+{"mysql":"SELECT post_status, COUNT(*) AS num_posts FROM wp_posts WHERE post_type = 'page' GROUP BY post_status","postgresql":"SELECT post_status, COUNT(*) AS num_posts FROM wp_posts WHERE post_type = 'page' GROUP BY post_status"}

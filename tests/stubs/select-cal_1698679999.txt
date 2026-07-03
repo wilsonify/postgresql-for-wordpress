@@ -1,0 +1,1 @@
+{"mysql":"SELECT SQL_CALC_FOUND_ROWS ID, post_title FROM wp_posts WHERE post_type = 'post' LIMIT 0, 10","postgresql":"SELECT  \"ID\" , post_title FROM wp_posts WHERE post_type = 'post' LIMIT 10 OFFSET 0"}

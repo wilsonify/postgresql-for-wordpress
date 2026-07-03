@@ -1,0 +1,1 @@
+{"mysql":"SELECT GET_LOCK('aioseo_cache_clear_lock', 0)","postgresql":"SELECT CASE WHEN pg_try_advisory_lock(hashtext('aioseo_cache_clear_lock')) THEN 1 ELSE 0 END"}

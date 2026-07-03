@@ -1,0 +1,1 @@
+{"mysql":"SHOW VARIABLES LIKE 'character_set_database'","postgresql":"SELECT 'character_set_database' AS \"Variable_name\", 'utf8' AS \"Value\";"}

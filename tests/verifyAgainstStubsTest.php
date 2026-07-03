@@ -32,6 +32,9 @@ final class VerifyAgainstStubsTest extends TestCase
             public $comments = "wp_comments";
             public $prefix = "wp_";
             public $options = "wp_options";
+            public $posts = "wp_posts";
+            public $terms = "wp_terms";
+            public $term_relationships = "wp_term_relationships";
         };
     }
 }

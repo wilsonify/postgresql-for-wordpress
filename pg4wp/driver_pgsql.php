@@ -65,6 +65,8 @@ function wpsqli_init()
         public $sslca;
         public $sslcapath;
         public $sslcipher;
+        public $client_info = '8.0.35';
+        public $client_version = '80035';
     };
 }
 
@@ -130,7 +132,13 @@ function wpsqli_real_connect(&$connection, $hostname = null, $username = null, $
     // Must connect to a specific database unlike MySQL
     $dbname = defined('DB_NAME') && DB_NAME ? DB_NAME : $database;
     $pg_connstr = $GLOBALS['pg4wp_connstr'] . ' dbname=' . $database;
-    $GLOBALS['pg4wp_conn'] = $connection = pg_connect($pg_connstr);
+    $GLOBALS['pg4wp_conn'] = $connection = @pg_connect($pg_connstr);
+
+    if ($connection === false) {
+        $GLOBALS['pg4wp_connect_errno'] = 1;
+    } else {
+        $GLOBALS['pg4wp_connect_errno'] = 0;
+    }
 
     return $connection;
 }
@@ -273,8 +281,8 @@ function wpsqli_get_server_info(&$connection)
  */
 function wpsqli_host_info(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_get_host_info => No direct equivalent. Host information is part of the connection string in PostgreSQL.
+    $host = pg_host($connection);
+    return $host ? $host . ' via TCP/IP' : 'localhost via TCP/IP';
 }
 
 /**
@@ -309,8 +317,7 @@ function wpsqli_ping(&$connection)
  */
 function wpsqli_thread_id(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_thread_id => No direct equivalent. PostgreSQL does not provide thread ID in the same manner as MySQL.
+    return pg_backend_pid($connection);
 }
 
 /**
@@ -325,8 +332,7 @@ function wpsqli_thread_id(&$connection)
  */
 function wpsqli_thread_safe()
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_thread_safe => No direct equivalent. PostgreSQL's thread safety is dependent on PHP's thread safety.
+    return true;
 }
 
 /**
@@ -343,8 +349,12 @@ function wpsqli_thread_safe()
  */
 function wpsqli_stat(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_stat => No direct equivalent
+    $result = @pg_query($connection, "SELECT version() AS version");
+    if ($result) {
+        $row = pg_fetch_assoc($result);
+        return $row['version'] ?? 'PostgreSQL server';
+    }
+    return 'PostgreSQL server';
 }
 
 /**
@@ -363,8 +373,11 @@ function wpsqli_stat(&$connection)
  */
 function wpsqli_options(&$connection, $option, $value)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_options => No direct equivalent. Options are set in the connection string or via set_config in PostgreSQL.
+    if (!isset($GLOBALS['pg4wp_options'])) {
+        $GLOBALS['pg4wp_options'] = [];
+    }
+    $GLOBALS['pg4wp_options'][$option] = $value;
+    return true;
 }
 
 /**
@@ -382,6 +395,9 @@ function wpsqli_connect_errno()
 {
     if ($GLOBALS['pg4wp_conn']) {
         return 0;
+    }
+    if (isset($GLOBALS['pg4wp_connect_errno'])) {
+        return $GLOBALS['pg4wp_connect_errno'];
     }
     return 1;
 }
@@ -515,7 +531,7 @@ function wpsqli_query(&$connection, $query, $result_mode = 0)
     // Check if a connection to Postgres database is established
     if (!$connection) {
         // Store SQL query for later execution when connection is available
-        $GLOBALS['pg4wp_pre_sql'][] = $sql;
+        $GLOBALS['pg4wp_pre_sql'][] = $query;
         return true;
     }
 
@@ -568,12 +584,33 @@ function wpsqli_query(&$connection, $query, $result_mode = 0)
  */
 function wpsqli_multi_query(&$connection, $query)
 {
-    // Store the initial SQL query
-    $initial = $query;
-    // Rewrite the SQL query for compatibility with Postgres
-    $sql = pg4wp_rewrite($query);
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_multi_query => No direct equivalent. Multiple queries must be executed separately in PostgreSQL.
+    $GLOBALS['pg4wp_multi_results'] = [];
+    $GLOBALS['pg4wp_multi_index'] = 0;
+
+    $statements = preg_split('/;(?=(?:[^\']*\'[^\']*\')*[^\']*$)/', $query);
+    $firstSuccess = false;
+
+    foreach ($statements as $stmt) {
+        $stmt = trim($stmt);
+        if (empty($stmt)) {
+            continue;
+        }
+
+        $rewritten = pg4wp_rewrite($stmt);
+        $result = @pg_query($connection, $rewritten);
+
+        if ($result !== false) {
+            if (!$firstSuccess) {
+                $firstSuccess = true;
+            }
+            $GLOBALS['pg4wp_multi_results'][] = $result;
+        } else {
+            $GLOBALS['pg4wp_multi_results'][] = false;
+        }
+    }
+
+    $GLOBALS['pg4wp_result'] = $GLOBALS['pg4wp_multi_results'][0] ?? false;
+    return $firstSuccess;
 }
 
 /**
@@ -1091,6 +1128,28 @@ function wpsqli_use_result(&$connection)
 }
 
 /**
+ * Fetches all result rows as an array of arrays, an array of objects, or a single column.
+ */
+function wpsqli_fetch_all($result, $mode = PGSQL_ASSOC)
+{
+    if ($result === false) {
+        return [];
+    }
+    return pg_fetch_all($result, $mode) ?: [];
+}
+
+/**
+ * Gets the result set from a prepared statement as a pg result object.
+ */
+function wpsqli_stmt_get_result($stmt)
+{
+    if (!($stmt instanceof pg4wp_stmt)) {
+        return false;
+    }
+    return $stmt->result;
+}
+
+/**
  * Frees the memory associated with a result.
  *
  * This function is a wrapper for the pg_free_result function. It's used to free the memory
@@ -1232,7 +1291,9 @@ function wpsqli_insert_id(&$connection = null)
         // PostgreSQL: Setting the value of the sequence based on the latest inserted ID.
         $GLOBALS['pg4wp_queued_query'] = "SELECT SETVAL('$seq',(SELECT MAX(\"ID\") FROM $table)+1);";
     } else {
-        // PostgreSQL: Using CURRVAL() to get the current value of the sequence.
+        // PostgreSQL: First try to create the sequence if it doesn't exist (multisite fix)
+        @pg_query($connection, "CREATE SEQUENCE IF NOT EXISTS $seq");
+        // Then get the current value
         $sql = "SELECT CURRVAL('$seq')";
         $res = pg_query($connection, $sql);
         if (false !== $res) {
@@ -1331,13 +1392,15 @@ function wpsqli_error(&$connection)
  */
 function wpsqli_errno(&$connection)
 {
-    $result = pg_get_result($connection);
-    if ($result === false) {
-        return false;
+    $result = $GLOBALS['pg4wp_result'] ?? null;
+    if ($result === false || $result === null) {
+        return 0;
     }
-
-    $result_status = pg_result_status($result);
-    return pg_result_error_field($result_status, PGSQL_DIAG_SQLSTATE);
+    $status = pg_result_status($result);
+    if ($status === PGSQL_FATAL_ERROR || $status === PGSQL_BAD_RESPONSE) {
+        return pg_result_error_field($result, PGSQL_DIAG_SQLSTATE) ?: 1;
+    }
+    return 0;
 }
 
 /**
@@ -1374,9 +1437,12 @@ function wpsqli_report($flags)
  */
 function wpsqli_info(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_info => No direct equivalent in PostgreSQL.
-    // This function retrieves information about the most recently executed query, which is not provided by PostgreSQL's PHP functions.
+    $result = $GLOBALS['pg4wp_result'] ?? null;
+    if ($result === false || $result === null) {
+        return null;
+    }
+    $rows = pg_affected_rows($result);
+    return "Rows matched: $rows Changed: $rows Warnings: 0";
 }
 
 
@@ -1400,10 +1466,7 @@ function wpsqli_info(&$connection)
  */
 function wpsqli_poll(&...$args)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_poll => No direct equivalent in PostgreSQL.
-    // Polling for result availability is not a concept that is directly exposed in PostgreSQL's PHP functions.
-    // Asynchronous query handling in PHP with PostgreSQL typically involves using separate processes or coroutines.
+    return false;
 }
 
 /**
@@ -1421,7 +1484,9 @@ function wpsqli_poll(&...$args)
  */
 function wpsqli_reap_async_query(&$connection)
 {
-    throw new \Exception("PG4WP: Not Yet Implemented");
-    // mysqli_reap_async_query => No direct equivalent in PostgreSQL.
-    // Asynchronous queries can be executed in PostgreSQL using pg_send_query and retrieved using pg_get_result.
+    $result = @pg_get_result($connection);
+    if ($result === false) {
+        $result = $GLOBALS['pg4wp_result'] ?? false;
+    }
+    return $result;
 }

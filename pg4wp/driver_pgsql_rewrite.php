@@ -16,7 +16,7 @@ function createSQLRewriter(string $sql): AbstractSQLRewriter
     if (preg_match('/^DO\b/i', $sql)) {
         return new SelectSQLRewriter(preg_replace('/^DO\b/i', 'SELECT', $sql));
     }
-    if (preg_match('/^(SELECT|INSERT|UPDATE|DELETE|DESCRIBE|ALTER TABLE|CREATE TABLE|DROP TABLE|SHOW INDEX|SHOW VARIABLES|SHOW TABLES|OPTIMIZE TABLE|SET NAMES|SHOW FULL COLUMNS)\b/i', $sql, $matches)) {
+    if (preg_match('/^(SELECT|INSERT|UPDATE|DELETE|DESCRIBE|ALTER TABLE|CREATE TABLE|DROP TABLE|SHOW INDEX|SHOW VARIABLES|SHOW TABLES|OPTIMIZE TABLE|SET NAMES|SHOW FULL COLUMNS|SHOW COLUMNS)\b/i', $sql, $matches)) {
         // Convert to a format suitable for class names (e.g., "SHOW TABLES" becomes "ShowTables")
         $type = str_replace(' ', '', ucwords(str_replace('_', ' ', strtolower($matches[1]))));
         $className = $type . 'SQLRewriter';
@@ -68,6 +68,7 @@ function pg4wp_rewrite($sql)
     $sql = correctMetaValue($sql);
     $sql = stripFromDual($sql);
     $sql = handleInterval($sql);
+    $sql = handleMySQLLocks($sql);
     $sql = cleanAndCapitalize($sql);
     $sql = correctEmptyInStatements($sql);
     $sql = correctQuoting($sql);
@@ -134,7 +135,8 @@ function correctMetaValue($sql)
  */
 function stripFromDual($sql)
 {
-    return preg_replace('/\s+FROM\s+DUAL(\s+|$)/i', '$1', $sql);
+    $sql = preg_replace('/\s+FROM\s+DUAL(\s+|;|\)|$)/i', '$1', $sql);
+    return $sql;
 }
 
 /**
@@ -164,9 +166,7 @@ function handleInterval($sql)
  */
 function cleanAndCapitalize($sql)
 {
-    // Remove illegal characters
     $sql = str_replace('`', '', $sql);
-    // Field names with CAPITALS need special handling
     if (false !== strpos($sql, 'ID')) {
         $patterns = [
             '/ID([^ ])/' => 'ID $1',
@@ -209,5 +209,20 @@ function correctQuoting($sql)
 {
     $sql = str_replace("\\'", "''", $sql);
     $sql = str_replace('\"', '"', $sql);
+    return $sql;
+}
+
+function handleMySQLLocks($sql)
+{
+    $sql = preg_replace_callback('/\bGET_LOCK\s*\(\s*([^,]+)\s*,\s*(\d+)\s*\)/i', function ($m) {
+        $lockName = trim($m[1]);
+        return 'CASE WHEN pg_try_advisory_lock(hashtext(' . $lockName . ')) THEN 1 ELSE 0 END';
+    }, $sql);
+
+    $sql = preg_replace_callback('/\bRELEASE_LOCK\s*\(\s*([^)]+)\s*\)/i', function ($m) {
+        $lockName = trim($m[1]);
+        return 'CASE WHEN pg_advisory_unlock(hashtext(' . $lockName . ')) THEN 1 ELSE 0 END';
+    }, $sql);
+
     return $sql;
 }

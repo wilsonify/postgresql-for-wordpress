@@ -49,7 +49,11 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
     {
         $sql = $this->original();
 
-        $sql = str_replace('CREATE TABLE IF NOT EXISTS ', 'CREATE TABLE ', $sql);
+        $sql = str_ireplace('CREATE TABLE IF NOT EXISTS ', 'CREATE TABLE ', $sql);
+
+        // Remove backticks so reserved word matching works correctly
+        $sql = str_replace('`', '', $sql);
+
         $pattern = '/CREATE TABLE [`]?(\w+)[`]?/';
         preg_match($pattern, $sql, $matches);
         $table = $matches[1];
@@ -68,13 +72,33 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
         $sql = preg_replace('/\bvarbinary\s*\(\s*\d+\s*\)/i', 'bytea', $sql);
         $sql = preg_replace('/\bbinary\s*\(\s*\d+\s*\)/i', 'bytea', $sql);
 
+        // Quote PostgreSQL reserved words used as column names in CREATE TABLE
+        $reservedCols = [
+            'default', 'end', 'order', 'group', 'key', 'comment',
+            'number', 'value', 'type', 'year', 'month', 'day',
+            'hour', 'minute', 'second', 'zone', 'time', 'date',
+        ];
+        foreach ($reservedCols as $reserved) {
+            $sql = preg_replace(
+                '/,\s*\b(' . preg_quote($reserved, '/') . ')\s+(?=\w+)/i',
+                ', "' . $reserved . '" ',
+                $sql
+            );
+            $sql = preg_replace(
+                '/\(\s*\b(' . preg_quote($reserved, '/') . ')\s+(?=\w+)/i',
+                '( "' . $reserved . '" ',
+                $sql
+            );
+        }
+
         // Fix auto_increment by adding a sequence
-        $pattern = '/int[ ]+NOT NULL auto_increment/';
+        $pattern = '/\w+(?:\s+NOT\s+NULL)?\s+auto_increment/i';
         preg_match($pattern, $sql, $matches);
         if($matches) {
             $seq = $table . '_seq';
-            $sql = str_replace('NOT NULL auto_increment', "NOT NULL DEFAULT nextval('$seq'::text)", $sql);
-            $sql .= "\nCREATE SEQUENCE $seq;";
+            $sql = preg_replace('/NOT\s+NULL\s+auto_increment/i', "NOT NULL DEFAULT nextval('$seq'::text)", $sql);
+            $sql = preg_replace('/\bauto_increment\b/i', "DEFAULT nextval('$seq'::text)", $sql);
+            $sql .= "\nCREATE SEQUENCE IF NOT EXISTS $seq;";
         }
 
         // Support for INDEX creation

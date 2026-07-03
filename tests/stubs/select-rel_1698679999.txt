@@ -1,0 +1,1 @@
+{"mysql":"SELECT RELEASE_LOCK('aioseo_cache_clear_lock')","postgresql":"SELECT CASE WHEN pg_advisory_unlock(hashtext('aioseo_cache_clear_lock')) THEN 1 ELSE 0 END"}
