@@ -148,7 +148,7 @@ function wpsqli_select_db(&$connection, $database)
     // Execute any pre-defined SQL commands
     if(!empty($GLOBALS['pg4wp_pre_sql'])) {
         foreach($GLOBALS['pg4wp_pre_sql'] as $sql2run) {
-            wpsqli_query($sql2run);
+            wpsqli_query($connection, $sql2run);
         }
     }
 
@@ -510,10 +510,11 @@ function get_primary_key_for_table(&$connection, $table)
  */
 function wpsqli_query(&$connection, $query, $result_mode = 0)
 {
+    $sql = $query;
     // Check if a connection to Postgres database is established
     if (!$connection) {
         // Store SQL query for later execution when connection is available
-        $GLOBALS['pg4wp_pre_sql'][] = $sql;
+        $GLOBALS['pg4wp_pre_sql'][] = $query;
         return true;
     }
 
@@ -699,6 +700,7 @@ function wpsqli_stmt_bind_result($stmt, &...$vars)
 function wpsqli_stmt_fetch($stmt)
 {
     // Store the initial SQL query
+    $query = $stmt;
     $initial = $query;
     // Rewrite the SQL query for compatibility with Postgres
     $sql = pg4wp_rewrite($query);
@@ -1139,6 +1141,7 @@ function wpsqli_insert_id(&$connection = null)
 {
     global $wpdb;
     $data = null;
+    $sql = '';
     $ins_field = $GLOBALS['pg4wp_ins_field'];
     $table = $GLOBALS['pg4wp_ins_table'];
 
