@@ -32,6 +32,7 @@ class ShowIndexSQLRewriter extends AbstractSQLRewriter
      */
     public function generatePostgresShowIndexFrom($tableName)
     {
+        $table = $tableName;
         $sql = <<<SQL
         SELECT bc.relname AS "Table",
             CASE WHEN i.indisunique THEN '0' ELSE '1' END AS "Non_unique",
