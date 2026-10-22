@@ -56,8 +56,6 @@ function pg4wp_rewrite($sql)
                 $end .= ';SELECT setval(\'' . $wpdb->terms . '_term_id_seq\', (SELECT MAX(term_id) FROM ' . $wpdb->terms . ')+1);';
             }
             break;
-        case 'Insert':
-            break;
         default:
     }
 
