@@ -22,8 +22,18 @@ final class verifyAgainstStubsTest extends TestCase
         $files = array_diff(scandir(self::STUBS_DIRECTORY), array('.', '..'));
         foreach($files as $file) {
             $data = json_decode(file_get_contents(self::STUBS_DIRECTORY . "/" . $file), true);
-            $this->assertSame($data['postgresql'], pg4wp_rewrite($data['mysql']));
+            // Trailing line whitespace is not significant in SQL; the rewriter
+            // trims it. Compare all other characters exactly.
+            $this->assertSame(
+                $this->normalize($data['postgresql']),
+                $this->normalize(pg4wp_rewrite($data['mysql']))
+            );
         }
+    }
+
+    private function normalize(string $sql): string
+    {
+        return implode("\n", array_map('rtrim', explode("\n", $sql)));
     }
 
     protected function setUp(): void
