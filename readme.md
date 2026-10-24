@@ -69,12 +69,33 @@ This is because the database needs to be up and running before any plugin can be
 1.	Point your Web Browser to your WordPress installation and go through the traditional WordPress installation routine.
 
 
+### Running the tests
+
+The test suite needs two generated, version-pinned dependencies: the five
+WordPress 6.4.1 core files used by the pg4wp bootstrap, and PHPUnit 10.4.2.
+They are not committed. From a clean checkout:
+
+```sh
+./scripts/bootstrap.sh
+./tests/tools/phpunit.phar tests/
+```
+
+`scripts/bootstrap.sh` downloads each archive into `deps/cache/`, verifies its
+SHA-256, and verifies the five WordPress files against WordPress.org's published
+MD5 checksums. The versions and hashes are in `scripts/versions.sh`; update that
+file rather than editing the generated `wp-includes/` or phar by hand.
+
+On Windows, run the scripts from Git Bash. The generated paths are ignored by
+git; see [`docs/third-party.md`](docs/third-party.md) for provenance and
+licensing.
+
 ### Contributing
 
-Contributions are welcome, please open a pull request with your changes and make sure the tests pass by running the test suite using
-`./tests/tools/phpunit.phar tests/`
+Contributions are welcome, please open a pull request with your changes and make
+sure the tests pass with the command above.
 
-If you find a failing scenario please add a test for it, A PR which fixes a scenario but does not include a test will not be accepted. 
+If you find a failing scenario please add a test for it. A PR which fixes a
+scenario but does not include a test will not be accepted. 
 
 ### License
 PG4WP is provided "as-is" with no warranty in the hope it can be useful.
