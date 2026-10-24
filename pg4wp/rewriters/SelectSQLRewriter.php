@@ -112,10 +112,10 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = preg_replace($pattern, 'ROUND(DATE_PART(\'epoch\',$1))', $sql);
 
         $date_funcs = array(
-            'DAYOFMONTH('	=> 'EXTRACT(DAY FROM ',
-            'YEAR('			=> 'EXTRACT(YEAR FROM ',
-            'MONTH('		=> 'EXTRACT(MONTH FROM ',
-            'DAY('			=> 'EXTRACT(DAY FROM ',
+            'DAYOFMONTH('    => 'EXTRACT(DAY FROM ',
+            'YEAR('            => 'EXTRACT(YEAR FROM ',
+            'MONTH('        => 'EXTRACT(MONTH FROM ',
+            'DAY('            => 'EXTRACT(DAY FROM ',
         );
 
         $sql = str_replace('ORDER BY post_date DESC', 'ORDER BY YEAR(post_date) DESC, MONTH(post_date) DESC', $sql);
@@ -257,34 +257,27 @@ class SelectSQLRewriter extends AbstractSQLRewriter
 
         $selectClause = trim($selectMatches[1]);
 
-        // Check for wildcard in SELECT
-        if (strpos($selectClause, '*') !== false) {
-            return $sql; // Cannot handle wildcards, return original query
-        }
-
         $modified = false;
 
-        // Handle ORDER BY columns
-        if ($orderMatches) {
-            $selectClause = $this->appendMissingColumns($selectClause, trim($orderMatches[1]), $modified);
-        }
+        // Wildcards cannot be expanded, so leave those queries untouched
+        if (strpos($selectClause, '*') === false) {
+            // Handle ORDER BY columns
+            if ($orderMatches) {
+                $selectClause = $this->appendMissingColumns($selectClause, trim($orderMatches[1]), $modified);
+            }
 
-        // Handle GROUP BY columns
-        if ($groupMatches && !$modified) {
-            $selectClause = $this->appendMissingColumns($selectClause, trim($groupMatches[1]), $modified);
-        }
-
-        if (!$modified) {
-            return $sql;
+            // Handle GROUP BY columns
+            if ($groupMatches && !$modified) {
+                $selectClause = $this->appendMissingColumns($selectClause, trim($groupMatches[1]), $modified);
+            }
         }
 
         // Find the exact position for the replacement
-        $selectStartPos = strpos($sql, $selectMatches[1]);
-        if ($selectStartPos === false) {
-            return $sql; // If for some reason the exact match is not found, return the original query
-        }
+        $selectStartPos = $modified ? strpos($sql, $selectMatches[1]) : false;
 
-        return substr_replace($sql, $selectClause, $selectStartPos, strlen($selectMatches[1]));
+        return ($selectStartPos === false)
+            ? $sql
+            : substr_replace($sql, $selectClause, $selectStartPos, strlen($selectMatches[1]));
     }
 
     private function appendMissingColumns(string $selectClause, string $clause, bool &$modified): string
@@ -322,18 +315,12 @@ class SelectSQLRewriter extends AbstractSQLRewriter
      */
     protected function ensureGroupByOrAggregate(string $sql): string
     {
-        // Check for system or session variables
-        if (preg_match('/@@\w+/', $sql)) {
-            return $sql;
-        }
-
         // Regular expression to capture main SQL components.
         $regex = '/(SELECT\s+)(.*?)(\s+FROM\s+)([^ ]+)(\s+WHERE\s+.*?(?= ORDER BY | GROUP BY | LIMIT |$))?(ORDER BY.*?(?= LIMIT |$))?(LIMIT.*?$)?/is';
 
-        // Capture main SQL components using regex
-        if (!preg_match($regex, $sql, $matches)) {
-            return $sql;
-        }
+        // Skip system or session variables, and capture the main SQL components
+        $matches = [];
+        $parsed = 0 === preg_match('/@@\w+/', $sql) && 1 === preg_match($regex, $sql, $matches);
 
         $selectClause = trim($matches[2] ?? '');
         $fromClause = trim($matches[4] ?? '');
@@ -341,7 +328,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $orderClause = trim($matches[6] ?? '');
         $limitClause = trim($matches[7] ?? '');
 
-        if (empty($selectClause) || empty($fromClause)) {
+        if (!$parsed || empty($selectClause) || empty($fromClause)) {
             return $sql;
         }
 
