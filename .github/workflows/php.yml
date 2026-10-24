@@ -24,5 +24,8 @@ jobs:
         php-version: '8.3.36'
         coverage: none
 
+    - name: Fetch pinned test dependencies
+      run: ./scripts/bootstrap.sh
+
     - name: Run Tests
       run: ./tests/tools/phpunit.phar tests/
