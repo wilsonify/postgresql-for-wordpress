@@ -4,62 +4,49 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
 {
     private const TEXT = ' text';
     private $stringReplacements = [
-        ' tinytext'		=> self::TEXT,
-        ' mediumtext'	=> self::TEXT,
-        ' longtext'		=> self::TEXT,
-        ' unsigned'		=> ' ',
-        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''	=> 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
-        'default \'0000-00-00 00:00:00\''	=> 'DEFAULT now()',
-        '\'0000-00-00 00:00:00\''	=> 'now()',
-        ' datetime'		=> ' timestamp',
+        ' tinytext'        => self::TEXT,
+        ' mediumtext'    => self::TEXT,
+        ' longtext'        => self::TEXT,
+        ' unsigned'        => ' ',
+        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''    => 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
+        'default \'0000-00-00 00:00:00\''    => 'DEFAULT now()',
+        '\'0000-00-00 00:00:00\''    => 'now()',
+        ' datetime'        => ' timestamp',
         ' DEFAULT CHARACTER SET utf8mb4' => '',
-        ' DEFAULT CHARACTER SET utf8'	=> '',
+        ' DEFAULT CHARACTER SET utf8'    => '',
 
         // For WPMU (starting with WP 3.2)
-        " enum('0','1')"	=> ' smallint',
-        ' COLLATE utf8mb4_unicode_520_ci'	=> '',
-        ' COLLATE utf8_general_ci'	=> '',
+        " enum('0','1')"    => ' smallint',
+        ' COLLATE utf8mb4_unicode_520_ci'    => '',
+        ' COLLATE utf8_general_ci'    => '',
         ' CHARACTER SET utf8' => '',
         ' DEFAULT CHARSET=utf8' => '',
 
         // For flash-album-gallery plugin
-        ' tinyint'		=> ' smallint'
+        ' tinyint'        => ' smallint'
     ];
 
     public function rewrite(): string
     {
         $sql = $this->original();
 
-        $sql = $this->rewrite_numeric_type($sql);
-        $sql = $this->rewrite_columns_with_protected_names($sql);
+        $sql = $this->rewriteNumericType($sql);
+        $sql = $this->rewriteColumnsWithProtectedNames($sql);
 
         if (str_contains($sql, 'ADD INDEX') || str_contains($sql, 'ADD UNIQUE INDEX')) {
             $sql = $this->rewriteAddIndex($sql);
-            return $sql;
-        }
-        if (str_contains($sql, 'CHANGE COLUMN')) {
+        } elseif (str_contains($sql, 'CHANGE COLUMN')) {
             $sql = $this->rewriteChangeColumn($sql);
-            return $sql;
-        }
-        if (str_contains($sql, 'ALTER COLUMN')) {
+        } elseif (str_contains($sql, 'ALTER COLUMN')) {
             $sql = $this->rewriteAlterColumn($sql);
-            return $sql;
-        }
-        if (str_contains($sql, 'ADD COLUMN')) {
+        } elseif (str_contains($sql, 'ADD COLUMN')) {
             $sql = $this->rewriteAddColumn($sql);
-            return $sql;
-        }
-        if (str_contains($sql, 'ADD KEY') || str_contains($sql, 'ADD UNIQUE KEY')) {
+        } elseif (str_contains($sql, 'ADD KEY') || str_contains($sql, 'ADD UNIQUE KEY')) {
             $sql = $this->rewriteAddKey($sql);
-            return $sql;
-        }
-        if (str_contains($sql, 'DROP INDEX')) {
+        } elseif (str_contains($sql, 'DROP INDEX')) {
             $sql = $this->rewriteDropIndex($sql);
-            return $sql;
-        }
-        if (str_contains($sql, 'DROP PRIMARY KEY')) {
+        } elseif (str_contains($sql, 'DROP PRIMARY KEY')) {
             $sql = $this->rewriteDropPrimaryKey($sql);
-            return $sql;
         }
 
         return $sql;
@@ -216,7 +203,7 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
         return $sql;
     }
 
-    private function rewrite_numeric_type($sql)
+    private function rewriteNumericType($sql)
     {
         // Numeric types in MySQL which need to be rewritten
         $numeric_types = ["bigint", "int", "integer", "smallint", "mediumint", "tinyint", "double", "decimal"];
@@ -263,7 +250,7 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
         return $sql;
     }
 
-    private function rewrite_columns_with_protected_names($sql)
+    private function rewriteColumnsWithProtectedNames($sql)
     {
         // Splitting the SQL statement into parts before "(", inside "(", and after ")"
         if (preg_match('/^(CREATE TABLE IF NOT EXISTS|CREATE TABLE|ALTER TABLE)\s+([^\s]+)\s*\((.*)\)(.*)$/is', $sql, $matches)) {
