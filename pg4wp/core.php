@@ -15,7 +15,7 @@ require_once ABSPATH . '/wp-includes/cache.php';
 require_once ABSPATH . '/wp-includes/l10n.php';
 
 // Load the driver defined in 'db.php'
-require_once(PG4WP_ROOT . '/driver_' . DB_DRIVER . '.php');
+require_once PG4WP_ROOT . '/driver_' . DB_DRIVER . '.php';
 
 // This loads up the wpdb class applying appropriate changes to it
 $replaces = array(
@@ -31,7 +31,11 @@ $replaces = array(
     '?>'		=> '',
 );
 
-eval(str_replace(array_keys($replaces), array_values($replaces), file_get_contents(ABSPATH . '/wp-includes/class-wpdb.php')));
+$pg4wpWpdbSource = str_replace(array_keys($replaces), array_values($replaces), file_get_contents(ABSPATH . '/wp-includes/class-wpdb.php'));
+$pg4wpWpdbFile = tempnam(sys_get_temp_dir(), 'pg4wp');
+file_put_contents($pg4wpWpdbFile, '<?php ' . $pg4wpWpdbSource);
+require_once $pg4wpWpdbFile;
+unlink($pg4wpWpdbFile);
 
 // Create wpdb object if not already done
 if (!isset($wpdb) && defined('DB_USER')) {

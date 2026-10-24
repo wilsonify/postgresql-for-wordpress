@@ -33,30 +33,30 @@ class ShowFullColumnsSQLRewriter extends AbstractSQLRewriter
      */
     public function generatePostgresShowColumns($tableName, $schema = "public")
     {
-        $sql = <<<SQL
-            SELECT 
+        return <<<SQL
+            SELECT
                 a.attname AS "Field",
                 pg_catalog.format_type(a.atttypid, a.atttypmod) AS "Type",
-                (CASE 
-                    WHEN a.attnotnull THEN 'NO' 
-                    ELSE 'YES' 
+                (CASE
+                    WHEN a.attnotnull THEN 'NO'
+                    ELSE 'YES'
                 END) AS "Null",
-                (CASE 
+                (CASE
                     WHEN i.indisprimary THEN 'PRI'
                     WHEN i.indisunique THEN 'UNI'
-                    ELSE '' 
+                    ELSE ''
                 END) AS "Key",
                 pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) AS "Default",
                 '' AS "Extra",
                 'select,insert,update,references' AS "Privileges",
                 d.description AS "Comment"
-            FROM 
+            FROM
                 pg_catalog.pg_attribute a
                 LEFT JOIN pg_catalog.pg_description d ON (a.attrelid = d.objoid AND a.attnum = d.objsubid)
                 LEFT JOIN pg_catalog.pg_attrdef ad ON (a.attrelid = ad.adrelid AND a.attnum = ad.adnum)
                 LEFT JOIN pg_catalog.pg_index i ON (a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey))
-            WHERE 
-                a.attnum > 0 
+            WHERE
+                a.attnum > 0
                 AND NOT a.attisdropped
                 AND a.attrelid = (
                     SELECT c.oid
@@ -65,10 +65,8 @@ class ShowFullColumnsSQLRewriter extends AbstractSQLRewriter
                     WHERE c.relname = '$tableName'
                     AND n.nspname = '$schema'
                 )
-            ORDER BY 
+            ORDER BY
                 a.attnum;
         SQL;
-
-        return $sql;
     }
 }

@@ -2,6 +2,9 @@
 
 class DeleteSQLRewriter extends AbstractSQLRewriter
 {
+    private const WHERE = 'WHERE ';
+    private const OR_CLAUSE = ') OR (';
+    private const TRIMMABLE = " \t\n\r;";
     public function rewrite(): string
     {
         global $wpdb;
@@ -31,20 +34,20 @@ class DeleteSQLRewriter extends AbstractSQLRewriter
         }
         // Rewrite _transient_timeout multi-table delete query with dynamic prefix for options table
         elseif(preg_match('/DELETE a, b FROM ' . preg_quote($prefix, '/') . 'options a, ' . preg_quote($prefix, '/') . 'options b/', $sql)) {
-            $where = substr($sql, strpos($sql, 'WHERE ') + 6);
-            $where = rtrim($where, " \t\n\r;");
+            $where = substr($sql, strpos($sql, self::WHERE) + 6);
+            $where = rtrim($where, self::TRIMMABLE);
             // Fix string/number comparison by adding check and cast
             $where = str_replace('AND b.option_value', 'AND b.option_value ~ \'^[0-9]+$\' AND CAST(b.option_value AS BIGINT)', $where);
             // Mirror WHERE clause to delete both sides of self-join.
             $where2 = strtr($where, array('a.' => 'b.', 'b.' => 'a.'));
             $sql = "DELETE FROM {$wpdb->options} a USING {$wpdb->options} b WHERE " .
-                '(' . $where . ') OR (' . $where2 . ');';
+                '(' . $where . self::OR_CLAUSE . $where2 . ');';
         }
 
         // Rewrite _transient_timeout multi-table delete query with dynamic prefix for sitemeta table
         elseif(preg_match('/DELETE a, b FROM ' . preg_quote($prefix, '/') . 'sitemeta a, ' . preg_quote($prefix, '/') . 'sitemeta b/', $sql)) {
-            $where = substr($sql, strpos($sql, 'WHERE ') + 6);
-            $where = rtrim($where, " \t\n\r;");
+            $where = substr($sql, strpos($sql, self::WHERE) + 6);
+            $where = rtrim($where, self::TRIMMABLE);
             // Fix string/number comparison by adding check and cast
             $where = str_replace('AND b.meta_value', 'AND b.meta_value ~ \'^[0-9]+$\' AND CAST(b.meta_value AS BIGINT)', $where);
             // Mirror WHERE clause to delete both sides of self-join.
@@ -52,46 +55,17 @@ class DeleteSQLRewriter extends AbstractSQLRewriter
             // Use $wpdb's sitemeta table name which should already have the correct prefix
             if(isset($wpdb->sitemeta)) {
                 $sql = "DELETE FROM {$wpdb->sitemeta} a USING {$wpdb->sitemeta} b WHERE " .
-                    '(' . $where . ') OR (' . $where2 . ');';
+                    '(' . $where . self::OR_CLAUSE . $where2 . ');';
             } else {
                 // Fallback if $wpdb->sitemeta is not available
                 $sql = "DELETE FROM {$prefix}sitemeta a USING {$prefix}sitemeta b WHERE " .
-                    '(' . $where . ') OR (' . $where2 . ');';
+                    '(' . $where . self::OR_CLAUSE . $where2 . ');';
             }
         }
         
         // Add a more general pattern to handle multi-table DELETE with aliases and dynamic table names
         elseif(preg_match('/DELETE\s+([a-zA-Z0-9_]+),\s*([a-zA-Z0-9_]+)\s+FROM\s+([a-zA-Z0-9_' . preg_quote($prefix, '/') . ']+)\s+([a-zA-Z0-9_]+),\s*([a-zA-Z0-9_' . preg_quote($prefix, '/') . ']+)\s+([a-zA-Z0-9_]+)\s+WHERE/i', $sql, $matches)) {
-            // Extract aliases and table names
-            $firstAlias = $matches[1];
-            $secondAlias = $matches[2];
-            $firstTable = $matches[3];
-            $firstTableAlias = $matches[4];
-            $secondTable = $matches[5];
-            $secondTableAlias = $matches[6];
-            
-            // Extract WHERE clause
-            $where = substr($sql, strpos($sql, 'WHERE ') + 6);
-            $where = rtrim($where, " \t\n\r;");
-            
-            // Check if the table names are known WordPress tables and replace with dynamic property references
-            foreach([$firstTable, $secondTable] as $index => $tableName) {
-                // Strip prefix if it exists to get the base table name
-                $baseTableName = preg_replace('/^' . preg_quote($prefix, '/') . '/', '', $tableName);
-                
-                // Check if $wpdb has a property for this table
-                if(isset($wpdb->$baseTableName)) {
-                    // Replace the hardcoded table name with the dynamic property
-                    if($index === 0) {
-                        $firstTable = $wpdb->$baseTableName;
-                    } else {
-                        $secondTable = $wpdb->$baseTableName;
-                    }
-                }
-            }
-            
-            // Generate PostgreSQL DELETE...USING syntax
-            $sql = "DELETE FROM $firstTable $firstTableAlias USING $secondTable $secondTableAlias WHERE $where;";
+            $sql = $this->rewriteGeneralDelete($sql, $prefix, $matches);
         }
 
         // Akismet sometimes doesn't write 'comment_ID' with 'ID' in capitals where needed ...
@@ -100,5 +74,39 @@ class DeleteSQLRewriter extends AbstractSQLRewriter
         }
 
         return $sql;
+    }
+
+    private function rewriteGeneralDelete(string $sql, string $prefix, array $matches): string
+    {
+        global $wpdb;
+
+        // Extract aliases and table names
+        $firstTable = $matches[3];
+        $firstTableAlias = $matches[4];
+        $secondTable = $matches[5];
+        $secondTableAlias = $matches[6];
+
+        // Extract WHERE clause
+        $where = substr($sql, strpos($sql, self::WHERE) + 6);
+        $where = rtrim($where, self::TRIMMABLE);
+
+        // Check if the table names are known WordPress tables and replace with dynamic property references
+        foreach ([$firstTable, $secondTable] as $index => $tableName) {
+            // Strip prefix if it exists to get the base table name
+            $baseTableName = preg_replace('/^' . preg_quote($prefix, '/') . '/', '', $tableName);
+
+            // Check if $wpdb has a property for this table
+            if (isset($wpdb->$baseTableName)) {
+                // Replace the hardcoded table name with the dynamic property
+                if ($index === 0) {
+                    $firstTable = $wpdb->$baseTableName;
+                } else {
+                    $secondTable = $wpdb->$baseTableName;
+                }
+            }
+        }
+
+        // Generate PostgreSQL DELETE...USING syntax
+        return "DELETE FROM $firstTable $firstTableAlias USING $secondTable $secondTableAlias WHERE $where;";
     }
 }

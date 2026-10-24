@@ -2,10 +2,11 @@
 
 class CreateTableSQLRewriter extends AbstractSQLRewriter
 {
+    private const TEXT = ' text';
     private $stringReplacements = [
-        ' tinytext'		=> ' text',
-        ' mediumtext'	=> ' text',
-        ' longtext'		=> ' text',
+        ' tinytext'		=> self::TEXT,
+        ' mediumtext'	=> self::TEXT,
+        ' longtext'		=> self::TEXT,
         ' unsigned'		=> ' ',
         'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''	=> 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
         'default \'0000-00-00 00:00:00\''	=> 'DEFAULT now()',
@@ -142,15 +143,15 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
         return $sql;
     }
 
-    private function rewrite_columns_with_protected_names($sql) 
+    private function rewrite_columns_with_protected_names($sql)
     {
         // Splitting the SQL statement into parts before "(", inside "(", and after ")"
         if (preg_match('/^(CREATE TABLE IF NOT EXISTS|CREATE TABLE|ALTER TABLE)\s+([^\s]+)\s*\((.*)\)(.*)$/is', $sql, $matches)) {
             $prefix = $matches[1] . ' ' . $matches[2] . ' (';
             $columnsAndKeys = $matches[3];
             $suffix = ')' . $matches[4];
-    
-            $regex = '/(?:^|\s*,\s*)(\b(?:timestamp|date|time|default|end)\b)\s*(?=\s+\w+)/i'; 
+
+            $regex = '/(?:^|\s*,\s*)(\b(?:timestamp|date|time|default|end)\b)\s*(?=\s+\w+)/i';
 
             // Callback function to add quotes around protected column names
             $callback = function($matches) {

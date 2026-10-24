@@ -4,48 +4,49 @@ class SelectSQLRewriter extends AbstractSQLRewriter
 {
     public function rewrite(): string
     {
-        global $wpdb;
-
-        $sql = $this->original();
-
-        // SQL_CALC_FOUND_ROWS doesn't exist in PostgreSQL but it's needed for correct paging
-        if(false !== strpos($sql, 'SQL_CALC_FOUND_ROWS')) {
-            $sql = str_replace('SQL_CALC_FOUND_ROWS', '', $sql);
-            $GLOBALS['pg4wp_numrows_query'] = $sql;
-            if(PG4WP_DEBUG) {
-                error_log('[' . microtime(true) . "] Number of rows required for :\n$sql\n---------------------\n", 3, PG4WP_LOG . 'pg4wp_NUMROWS.log');
-            }
-        }
+        $sql = $this->stripCalcFoundRows($this->original());
 
         if(false !== strpos($sql, 'FOUND_ROWS()')) {
-            // Here we convert the latest query into a COUNT query
-            $sql = $GLOBALS['pg4wp_numrows_query'];
-
-            // Remove the LIMIT clause if it exists
-            $sql = preg_replace('/\s+LIMIT\s+\d+(\s*,\s*\d+)?/i', '', $sql);
-
-            // Remove the ORDER BY containing case / end clause if it exists
-            $sql = preg_replace('/\s+ORDER\s+BY\s+.+END\),[^)]+/is', '', $sql);
-
-            // Remove the ORDER BY clause if it exists
-            $sql = preg_replace('/\s+ORDER\s+BY\s+[^)]+/i', '', $sql);
-
-            // Replace the fields in the SELECT clause with COUNT(*)
-            $sql = preg_replace('/SELECT\s+.*?\s+FROM\s+/is', 'SELECT COUNT(*) FROM ', $sql, 1);
+            $sql = $this->rewriteFoundRows();
         }
 
         if(false !== strpos($sql, 'information_schema')) {
-            // WP Site Health rewrites
-            if (false !== strpos($sql, "SELECT TABLE_NAME AS 'table', TABLE_ROWS AS 'rows', SUM(data_length + index_length)")) {
-                $sql = $this->postgresTableSizeRewrite();
-                return $sql;
-            }
-
-            throw new Exception("Unsupported call to information_schema, this probably won't work correctly and needs to be specifically handled, open a github issue with the SQL");
+            return $this->rewriteInformationSchema($sql);
         }
 
         $sql = $this->ensureOrderByInSelect($sql);
+        $sql = $this->rewriteMySQLFunctions($sql);
+        $sql = $this->normalizeHavingClause($sql);
+        $sql = $this->rewriteIntegerBooleans($sql);
 
+        return $this->rewriteRowExpressions($sql);
+    }
+
+    /**
+     * SQL_CALC_FOUND_ROWS doesn't exist in PostgreSQL but it's needed for correct paging.
+     * The query without the keyword is stored for a later FOUND_ROWS() call.
+     */
+    private function stripCalcFoundRows(string $sql): string
+    {
+        if (false === strpos($sql, 'SQL_CALC_FOUND_ROWS')) {
+            return $sql;
+        }
+
+        $sql = str_replace('SQL_CALC_FOUND_ROWS', '', $sql);
+        $GLOBALS['pg4wp_numrows_query'] = $sql;
+
+        if (PG4WP_DEBUG) {
+            error_log('[' . microtime(true) . "] Number of rows required for :\n$sql\n---------------------\n", 3, PG4WP_LOG . 'pg4wp_NUMROWS.log');
+        }
+
+        return $sql;
+    }
+
+    /**
+     * Translate the MySQL scalar functions and operators used by WordPress into PostgreSQL equivalents.
+     */
+    private function rewriteMySQLFunctions(string $sql): string
+    {
         // Handle +0 casting in order by
         // Regular expression to match the "ORDER BY" pattern
         $pattern = '/ORDER BY\s+([a-zA-Z0-9_]+)\.meta_value\s*\+\s*0/i';
@@ -66,7 +67,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = preg_replace('/COUNT(.+)ORDER BY.+/s', 'COUNT$1', $sql);
 
         // HANDLE REGEXP
-        $sql = preg_replace('/REGEXP/', '~', $sql);
+        $sql = str_replace('REGEXP', '~', $sql);
 
         $sql = str_replace("utc_timestamp()", "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'", $sql);
 
@@ -132,13 +133,21 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = preg_replace($pattern, "''", $sql);
 
 
-        // TODO: this seems wrong but if we remove it we get failures with XYZ is not part of the group By
+        // Note: this seems wrong, but removing it causes "XYZ is not part of the GROUP BY" failures
         if(isset($wpdb)) {
             $sql = str_replace('GROUP BY ' . $wpdb->prefix . 'posts.ID', '', $sql);
         }
 
         // MySQL 'LIKE' is case insensitive by default, whereas PostgreSQL 'LIKE' is
-        $sql = str_replace(' LIKE ', ' ILIKE ', $sql);
+        return str_replace(' LIKE ', ' ILIKE ', $sql);
+    }
+
+    /**
+     * Handle the WordPress specific comments and paging tweaks applied at the end of a query rewrite.
+     */
+    private function rewriteRowExpressions(string $sql): string
+    {
+        global $wpdb;
 
         // INDEXES are not yet supported
         if(false !== strpos($sql, 'USE INDEX (comment_date_gmt)')) {
@@ -153,16 +162,37 @@ class SelectSQLRewriter extends AbstractSQLRewriter
             $sql = str_replace(' comment_id ', ' comment_ID ', $sql);
         }
 
-        // MySQL treats a HAVING clause without GROUP BY like WHERE
-        if(false !== strpos($sql, 'HAVING') && false === strpos($sql, 'GROUP BY')) {
-            if(false === strpos($sql, 'WHERE')) {
-                $sql = str_replace('HAVING', 'WHERE', $sql);
-            } else {
-                $pattern = '/WHERE\s+(.*?)\s+HAVING\s+(.*?)(\s*(?:ORDER|LIMIT|PROCEDURE|INTO|FOR|LOCK|$))/';
-                $sql = preg_replace($pattern, 'WHERE ($1) AND ($2) $3', $sql);
-            }
+        // MySQL supports strings as names, PostgreSQL needs identifiers.
+        // Limit to after closing parenthesis to reduce false-positives
+        // Currently only an issue for nextgen-gallery plugin
+        $pattern = '/\) AS \'([^\']+)\'/';
+
+        return preg_replace($pattern, ') AS "$1"', $sql);
+    }
+
+    /**
+     * MySQL treats a HAVING clause without GROUP BY like WHERE.
+     */
+    private function normalizeHavingClause(string $sql): string
+    {
+        if (false === strpos($sql, 'HAVING') || false !== strpos($sql, 'GROUP BY')) {
+            return $sql;
         }
 
+        if (false === strpos($sql, 'WHERE')) {
+            return str_replace('HAVING', 'WHERE', $sql);
+        }
+
+        $pattern = '/WHERE\s+(.*?)\s+HAVING\s+(.*?)(\s*(?:ORDER|LIMIT|PROCEDURE|INTO|FOR|LOCK|$))/';
+
+        return preg_replace($pattern, 'WHERE ($1) AND ($2) $3', $sql);
+    }
+
+    /**
+     * Translate MySQL integer booleans (WHERE 0, AND 0, ...) into PostgreSQL literals.
+     */
+    private function rewriteIntegerBooleans(string $sql): string
+    {
         // MySQL allows integers to be used as boolean expressions
         // where 0 is false and all other values are true.
         //
@@ -175,15 +205,8 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = preg_replace($pattern, '$1false$2', $sql);
 
         $pattern = '/(AND\s+|OR\s+)0(' . $pattern_after_where . ')/';
-        $sql = preg_replace($pattern, '$1false$2', $sql);
 
-        // MySQL supports strings as names, PostgreSQL needs identifiers.
-        // Limit to after closing parenthesis to reduce false-positives
-        // Currently only an issue for nextgen-gallery plugin
-        $pattern = '/\) AS \'([^\']+)\'/';
-        $sql = preg_replace($pattern, ') AS "$1"', $sql);
-
-        return $sql;
+        return preg_replace($pattern, '$1false$2', $sql);
     }
 
     /**
@@ -192,6 +215,34 @@ class SelectSQLRewriter extends AbstractSQLRewriter
      * @param string $sql Original SQL query string.
      * @return string Modified SQL query string.
      */
+    private function rewriteFoundRows(): string
+    {
+        // Here we convert the latest query into a COUNT query
+        $sql = $GLOBALS['pg4wp_numrows_query'];
+
+        // Remove the LIMIT clause if it exists
+        $sql = preg_replace('/\s+LIMIT\s+\d+(\s*,\s*\d+)?/i', '', $sql);
+
+        // Remove the ORDER BY containing case / end clause if it exists
+        $sql = preg_replace('/\s+ORDER\s+BY\s+.+END\),[^)]+/is', '', $sql);
+
+        // Remove the ORDER BY clause if it exists
+        $sql = preg_replace('/\s+ORDER\s+BY\s+[^)]+/i', '', $sql);
+
+        // Replace the fields in the SELECT clause with COUNT(*)
+        return preg_replace('/SELECT\s+.*?\s+FROM\s+/is', 'SELECT COUNT(*) FROM ', $sql, 1);
+    }
+
+    private function rewriteInformationSchema(string $sql): string
+    {
+        // WP Site Health rewrites
+        if (false !== strpos($sql, "SELECT TABLE_NAME AS 'table', TABLE_ROWS AS 'rows', SUM(data_length + index_length)")) {
+            return $this->postgresTableSizeRewrite();
+        }
+
+        throw new PG4WPUnsupportedSqlException("Unsupported call to information_schema, this probably won't work correctly and needs to be specifically handled, open a github issue with the SQL");
+    }
+
     protected function ensureOrderByInSelect(string $sql): string
     {
         // Extract the SELECT and ORDER BY clauses
@@ -199,48 +250,28 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         preg_match('/ORDER BY(.*?)(ASC|DESC|$)/si', $sql, $orderMatches);
         preg_match('/GROUP BY(.*?)(ASC|DESC|$)/si', $sql, $groupMatches);
 
-        // If the SELECT clause is missing, return the original query
-        if (!$selectMatches) {
-            return $sql;
-        }
-
-        // If both ORDER BY and GROUP BY clauses are missing, return the original query
-        if (!$orderMatches && !$groupMatches) {
+        // If the SELECT clause or both ORDER BY and GROUP BY clauses are missing, return the original query
+        if (!$selectMatches || (!$orderMatches && !$groupMatches)) {
             return $sql;
         }
 
         $selectClause = trim($selectMatches[1]);
-        $orderByClause = $orderMatches ? trim($orderMatches[1]) : null;
-        $groupClause = $groupMatches ? trim($groupMatches[1]) : null;
-        $modified = false;
 
         // Check for wildcard in SELECT
         if (strpos($selectClause, '*') !== false) {
             return $sql; // Cannot handle wildcards, return original query
         }
 
+        $modified = false;
+
         // Handle ORDER BY columns
-        if ($orderByClause) {
-            $orderByColumns = explode(',', $orderByClause);
-            foreach ($orderByColumns as $col) {
-                $col = trim($col);
-                if (strpos($selectClause, $col) === false) {
-                    $selectClause .= ', ' . $col;
-                    $modified = true;
-                }
-            }
+        if ($orderMatches) {
+            $selectClause = $this->appendMissingColumns($selectClause, trim($orderMatches[1]), $modified);
         }
 
         // Handle GROUP BY columns
-        if ($groupClause && !$modified) {
-            $groupColumns = explode(',', $groupClause);
-            foreach ($groupColumns as $col) {
-                $col = trim($col);
-                if (strpos($selectClause, $col) === false) {
-                    $selectClause .= ', ' . $col;
-                    $modified = true;
-                }
-            }
+        if ($groupMatches && !$modified) {
+            $selectClause = $this->appendMissingColumns($selectClause, trim($groupMatches[1]), $modified);
         }
 
         if (!$modified) {
@@ -252,9 +283,21 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         if ($selectStartPos === false) {
             return $sql; // If for some reason the exact match is not found, return the original query
         }
-        $postgresSql = substr_replace($sql, $selectClause, $selectStartPos, strlen($selectMatches[1]));
 
-        return $postgresSql;
+        return substr_replace($sql, $selectClause, $selectStartPos, strlen($selectMatches[1]));
+    }
+
+    private function appendMissingColumns(string $selectClause, string $clause, bool &$modified): string
+    {
+        foreach (explode(',', $clause) as $col) {
+            $col = trim($col);
+            if (strpos($selectClause, $col) === false) {
+                $selectClause .= ', ' . $col;
+                $modified = true;
+            }
+        }
+
+        return $selectClause;
     }
 
     /**
@@ -270,7 +313,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
      *
      * @return string The transformed SQL query string with appropriate GROUP BY clause if required.
      *
-     * @throws Exception If the SQL query cannot be parsed or modified.
+     * @throws PG4WPUnsupportedSqlException If the SQL query cannot be parsed or modified.
      *
      * @example
      * Input:  SELECT COUNT(id), username FROM users;
@@ -280,7 +323,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
     protected function ensureGroupByOrAggregate(string $sql): string
     {
         // Check for system or session variables
-        if (preg_match('/@@[a-zA-Z0-9_]+/', $sql)) {
+        if (preg_match('/@@\w+/', $sql)) {
             return $sql;
         }
 
@@ -363,9 +406,8 @@ class SelectSQLRewriter extends AbstractSQLRewriter
 
             // Replace MySQL LIMIT syntax with PostgreSQL LIMIT syntax
             $postgresLimitSyntax = "LIMIT $limit OFFSET $offset";
-            $postgresSql = preg_replace('/LIMIT\s+\d+,\s*\d+/i', $postgresLimitSyntax, $sql);
 
-            return $postgresSql;
+            return preg_replace('/LIMIT\s+\d+,\s*\d+/i', $postgresLimitSyntax, $sql);
         }
 
         // Return original query if no MySQL LIMIT syntax is found
@@ -376,25 +418,23 @@ class SelectSQLRewriter extends AbstractSQLRewriter
     protected function postgresTableSizeRewrite($schema = 'public')
     {
 
-        $sql = <<<SQL
-        SELECT 
-            C.relname AS "table", 
-            S.n_live_tup AS "rows", 
+        return <<<SQL
+        SELECT
+            C.relname AS "table",
+            S.n_live_tup AS "rows",
             pg_total_relation_size(C.oid) AS "bytes"
-        FROM 
-            pg_class C 
-        LEFT JOIN 
-            pg_namespace N ON (N.oid = C.relnamespace) 
-        INNER JOIN 
-            pg_stat_user_tables S ON (S.relid = C.oid) 
-        WHERE 
-            N.nspname = '$schema' AND 
+        FROM
+            pg_class C
+        LEFT JOIN
+            pg_namespace N ON (N.oid = C.relnamespace)
+        INNER JOIN
+            pg_stat_user_tables S ON (S.relid = C.oid)
+        WHERE
+            N.nspname = '$schema' AND
             C.relname IN ('wp_comments','wp_options','wp_posts','wp_terms','wp_users')
-        GROUP BY 
+        GROUP BY
             C.relname, pg_total_relation_size(C.oid), S.n_live_tup;
         SQL;
-
-        return $sql;
     }
 
 }

@@ -4,7 +4,6 @@ class ShowTableStatusSQLRewriter extends AbstractSQLRewriter
 {
     public function rewrite(): string
     {
-        $sql = $this->original();
         return $this->generatePostgresShowTableStatus();
     }
 
@@ -16,17 +15,17 @@ class ShowTableStatusSQLRewriter extends AbstractSQLRewriter
      */
     public function generatePostgresShowTableStatus($schema = "public")
     {
-        $sql = <<<SQL
-        SELECT 
+        return <<<SQL
+        SELECT
             'Postgres' AS Engine,
-            cls.relname AS TableName, 
+            cls.relname AS TableName,
             NULL AS Version,
             NULL AS Row_format,
             cls.reltuples AS Rows,
             NULL AS Avg_row_length,
             pg_size_pretty(pg_relation_size(cls.oid)) AS Data_length,
             NULL AS Max_data_length,
-            pg_size_pretty(pg_indexes_size(cls.oid)) AS Index_length, 
+            pg_size_pretty(pg_indexes_size(cls.oid)) AS Index_length,
             NULL AS Data_free,
             NULL AS Auto_increment,
             NULL AS Create_time,
@@ -38,17 +37,15 @@ class ShowTableStatusSQLRewriter extends AbstractSQLRewriter
             obj_description(cls.oid) AS Comment
         FROM
             pg_class cls
-        JOIN 
+        JOIN
             pg_namespace nsp ON cls.relnamespace = nsp.oid
-        WHERE 
-            cls.relkind = 'r' 
-            AND nsp.nspname NOT LIKE 'pg_%' 
-            AND nsp.nspname != 'information_schema' 
-            AND nsp.nspname = '$schema' 
-        ORDER BY 
+        WHERE
+            cls.relkind = 'r'
+            AND nsp.nspname NOT LIKE 'pg_%'
+            AND nsp.nspname != 'information_schema'
+            AND nsp.nspname = '$schema'
+        ORDER BY
             cls.relname ASC;
         SQL;
-
-        return $sql;
     }
 }

@@ -20,7 +20,7 @@ abstract class AbstractSQLRewriter
     {
         // Get the called class name and remove the "SQLRewriter" suffix to get the SQL type
         $className = get_called_class();
-        $type = str_replace('SQLRewriter', '', $className);
-        return $type;
+
+        return str_replace('SQLRewriter', '', $className);
     }
 }

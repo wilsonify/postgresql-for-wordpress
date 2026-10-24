@@ -1,10 +1,14 @@
 <?php
 
 // Autoload function to automatically require rewriter classes from the "rewriters" folder
+// and the dedicated exceptions from the "exceptions" folder
 spl_autoload_register(function ($className) {
-    $filePath = PG4WP_ROOT . '/rewriters/' . $className . '.php';
-    if (file_exists($filePath)) {
-        require_once $filePath;
+    foreach (['rewriters', 'exceptions'] as $directory) {
+        $filePath = PG4WP_ROOT . '/' . $directory . '/' . $className . '.php';
+        if (file_exists($filePath)) {
+            require_once $filePath;
+            return;
+        }
     }
 });
 
@@ -19,11 +23,12 @@ function createSQLRewriter(string $sql): AbstractSQLRewriter
 
         if (class_exists($className)) {
             return new $className($sql);
-        } else {
-            throw new Exception("No class defined to handle SQL type: " . $type);
         }
+
+        throw new PG4WPUnsupportedSqlException("No class defined to handle SQL type: " . $type);
     }
-    throw new Exception("Invalid or unsupported SQL statement.");
+
+    throw new PG4WPUnsupportedSqlException("Invalid or unsupported SQL statement.");
 }
 
 
@@ -33,7 +38,6 @@ function pg4wp_rewrite($sql)
     global $wpdb;
 
     $initial = $sql;
-    $logto = 'queries';
     // The end of the query may be protected against changes
     $end = '';
 
@@ -70,25 +74,7 @@ function pg4wp_rewrite($sql)
 
     // For insert ID caching
     if($logto == 'INSERT') {
-        $pattern = '/INSERT INTO "?([\w_]+)"? \(([^)]+)\)/i';
-        preg_match($pattern, $sql, $matches);
-
-        if (isset($matches[1])) {
-            $GLOBALS['pg4wp_ins_table'] = $matches[1];
-        }
-
-        if (isset($matches[2])) {
-            $columns_str = $matches[2];
-            $columns = explode(',', $columns_str);
-            $columns = array_map(function ($column) {
-                return trim(trim($column), '"');
-            }, $columns);
-            if (isset($columns[0])) {
-                $GLOBALS['pg4wp_ins_field'] = $columns[0];
-            }
-        }
-
-        $GLOBALS['pg4wp_last_insert'] = $sql;
+        pg4wpCacheInsertId($sql);
     } elseif(isset($GLOBALS['pg4wp_queued_query'])) {
         pg_query($GLOBALS['pg4wp_queued_query']);
         unset($GLOBALS['pg4wp_queued_query']);
@@ -102,6 +88,32 @@ function pg4wp_rewrite($sql)
         }
     }
     return $sql;
+}
+
+/**
+ * Cache the table and first column of an INSERT statement for insert ID lookups.
+ *
+ * @param string $sql SQL query string
+ */
+function pg4wpCacheInsertId($sql)
+{
+    $pattern = '/INSERT INTO "?(\w+)"? \(([^)]+)\)/i';
+    preg_match($pattern, $sql, $matches);
+
+    if (isset($matches[1])) {
+        $GLOBALS['pg4wp_ins_table'] = $matches[1];
+    }
+
+    if (isset($matches[2])) {
+        $columns = array_map(function ($column) {
+            return trim(trim($column), '"');
+        }, explode(',', $matches[2]));
+        if (isset($columns[0])) {
+            $GLOBALS['pg4wp_ins_field'] = $columns[0];
+        }
+    }
+
+    $GLOBALS['pg4wp_last_insert'] = $sql;
 }
 
 /**
@@ -128,9 +140,9 @@ function correctMetaValue($sql)
 function handleInterval($sql)
 {
     // Generic "INTERVAL xx YEAR|MONTH|DAY|HOUR|MINUTE|SECOND" handler
-    $sql = preg_replace('/INTERVAL[ ]+(\d+)[ ]+(YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)/', "'\$1 \$2'::interval", $sql);
+    $sql = preg_replace('/INTERVAL +(\d+) +(YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)/', "'\$1 \$2'::interval", $sql);
     // DATE_SUB handling
-    $sql = preg_replace('/DATE_SUB[ ]*\(([^,]+),([^\)]+)\)/', '($1::timestamp - $2)', $sql);
+    $sql = preg_replace('/DATE_SUB *\(([^,]+),([^\)]+)\)/', '($1::timestamp - $2)', $sql);
     return $sql;
 }
 

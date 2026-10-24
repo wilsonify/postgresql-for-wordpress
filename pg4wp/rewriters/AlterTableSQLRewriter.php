@@ -2,10 +2,11 @@
 
 class AlterTableSQLRewriter extends AbstractSQLRewriter
 {
+    private const TEXT = ' text';
     private $stringReplacements = [
-        ' tinytext'		=> ' text',
-        ' mediumtext'	=> ' text',
-        ' longtext'		=> ' text',
+        ' tinytext'		=> self::TEXT,
+        ' mediumtext'	=> self::TEXT,
+        ' longtext'		=> self::TEXT,
         ' unsigned'		=> ' ',
         'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''	=> 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
         'default \'0000-00-00 00:00:00\''	=> 'DEFAULT now()',
@@ -28,7 +29,7 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
     public function rewrite(): string
     {
         $sql = $this->original();
-        
+
         $sql = $this->rewrite_numeric_type($sql);
         $sql = $this->rewrite_columns_with_protected_names($sql);
 
@@ -100,7 +101,6 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
             if(isset($this->stringReplacements[$type])) {
                 $type = $this->stringReplacements[$type];
             }
-            $unsigned = $matches[5];
             $notnull = $matches[6];
             $default = $matches[7];
             $defval = $matches[8];
@@ -150,7 +150,6 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
             if(isset($this->stringReplacements[$type])) {
                 $type = $this->stringReplacements[$type];
             }
-            $unsigned = $matches[4];
             $notnull = $matches[5];
             $default = $matches[6];
             $defval = $matches[7];
@@ -264,15 +263,15 @@ class AlterTableSQLRewriter extends AbstractSQLRewriter
         return $sql;
     }
 
-    private function rewrite_columns_with_protected_names($sql) 
+    private function rewrite_columns_with_protected_names($sql)
     {
         // Splitting the SQL statement into parts before "(", inside "(", and after ")"
         if (preg_match('/^(CREATE TABLE IF NOT EXISTS|CREATE TABLE|ALTER TABLE)\s+([^\s]+)\s*\((.*)\)(.*)$/is', $sql, $matches)) {
             $prefix = $matches[1] . ' ' . $matches[2] . ' (';
             $columnsAndKeys = $matches[3];
             $suffix = ')' . $matches[4];
-    
-            $regex = '/(?:^|\s*,\s*)(\b(?:timestamp|date|time|default)\b)\s*(?=\s+\w+)/i'; 
+
+            $regex = '/(?:^|\s*,\s*)(\b(?:timestamp|date|time|default)\b)\s*(?=\s+\w+)/i';
 
             // Callback function to add quotes around protected column names
             $callback = function($matches) {

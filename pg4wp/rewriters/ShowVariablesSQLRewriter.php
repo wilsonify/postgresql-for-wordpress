@@ -6,7 +6,7 @@ class ShowVariablesSQLRewriter extends AbstractSQLRewriter
     {
         $sql = $this->original();
         $variableName = $this->extractVariableName($sql);
-        return $this->generatePostgres($sql, $variableName);
+        return $this->generatePostgres($variableName);
     }
 
     /**
@@ -30,7 +30,7 @@ class ShowVariablesSQLRewriter extends AbstractSQLRewriter
      * @param string $tableName The table name
      * @return string The generated SQL query
      */
-    public function generatePostgres($sql, $variableName)
+    public function generatePostgres($variableName)
     {
         if ($variableName == "sql_mode") {
             // Act like MySQL default configuration, where sql_mode is ""
