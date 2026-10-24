@@ -2,6 +2,8 @@
 
 class SelectSQLRewriter extends AbstractSQLRewriter
 {
+    private const GROUP_BY_PREFIX = 'GROUP BY ';
+
     public function rewrite(): string
     {
         $sql = $this->stripCalcFoundRows($this->original());
@@ -47,6 +49,8 @@ class SelectSQLRewriter extends AbstractSQLRewriter
      */
     private function rewriteMySQLFunctions(string $sql): string
     {
+        global $wpdb;
+
         // Handle +0 casting in order by
         // Regular expression to match the "ORDER BY" pattern
         $pattern = '/ORDER BY\s+([a-zA-Z0-9_]+)\.meta_value\s*\+\s*0/i';
@@ -133,9 +137,17 @@ class SelectSQLRewriter extends AbstractSQLRewriter
         $sql = preg_replace($pattern, "''", $sql);
 
 
-        // Note: this seems wrong, but removing it causes "XYZ is not part of the GROUP BY" failures
+        // Note: this seems wrong, but removing it causes "XYZ is not part of the GROUP BY" failures.
+        // The ID column may have been quoted by ensureOrderByInSelect before we get here.
         if(isset($wpdb)) {
-            $sql = str_replace('GROUP BY ' . $wpdb->prefix . 'posts.ID', '', $sql);
+            $sql = str_replace(
+                [
+                    self::GROUP_BY_PREFIX . $wpdb->prefix . 'posts.ID',
+                    self::GROUP_BY_PREFIX . $wpdb->prefix . 'posts."ID"',
+                ],
+                '',
+                $sql
+            );
         }
 
         // MySQL 'LIKE' is case insensitive by default, whereas PostgreSQL 'LIKE' is
@@ -362,7 +374,7 @@ class SelectSQLRewriter extends AbstractSQLRewriter
             $postgresSql .= ' ' . $whereClause;
         }
 
-        $groupByClause = "GROUP BY " . implode(", ", $nonAggregateColumns);
+        $groupByClause = self::GROUP_BY_PREFIX . implode(", ", $nonAggregateColumns);
         if (!empty($groupByClause)) {
             $postgresSql .= ' ' . $groupByClause;
         }
