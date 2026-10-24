@@ -4,25 +4,25 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
 {
     private const TEXT = ' text';
     private $stringReplacements = [
-        ' tinytext'		=> self::TEXT,
-        ' mediumtext'	=> self::TEXT,
-        ' longtext'		=> self::TEXT,
-        ' unsigned'		=> ' ',
-        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''	=> 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
-        'default \'0000-00-00 00:00:00\''	=> 'DEFAULT now()',
-        '\'0000-00-00 00:00:00\''	=> 'now()',
-        ' datetime'		=> ' timestamp',
+        ' tinytext'        => self::TEXT,
+        ' mediumtext'    => self::TEXT,
+        ' longtext'        => self::TEXT,
+        ' unsigned'        => ' ',
+        'gmt datetime NOT NULL default \'0000-00-00 00:00:00\''    => 'gmt timestamp NOT NULL DEFAULT timezone(\'gmt\'::text, now())',
+        'default \'0000-00-00 00:00:00\''    => 'DEFAULT now()',
+        '\'0000-00-00 00:00:00\''    => 'now()',
+        ' datetime'        => ' timestamp',
         ' DEFAULT CHARACTER SET utf8mb4' => '',
-        ' DEFAULT CHARACTER SET utf8'	=> '',
+        ' DEFAULT CHARACTER SET utf8'    => '',
 
         // For WPMU (starting with WP 3.2)
-        " enum('0','1')"	=> ' smallint',
-        ' COLLATE utf8mb4_unicode_520_ci'	=> '',
-        ' COLLATE utf8_general_ci'	=> '',
+        " enum('0','1')"    => ' smallint',
+        ' COLLATE utf8mb4_unicode_520_ci'    => '',
+        ' COLLATE utf8_general_ci'    => '',
         ' CHARACTER SET utf8' => '',
         ' DEFAULT CHARSET=utf8' => '',
 
-        ' tinyint'		=> ' smallint',
+        ' tinyint'        => ' smallint',
         ' mediumint'    => ' integer'
     ];
 
@@ -55,8 +55,8 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
             $sql
         );
 
-        $sql = $this->rewrite_numeric_type($sql);
-        $sql = $this->rewrite_columns_with_protected_names($sql);
+        $sql = $this->rewriteNumericType($sql);
+        $sql = $this->rewriteColumnsWithProtectedNames($sql);
 
         // Support for UNIQUE INDEX creation
         $pattern = '/,\s*(UNIQUE |)KEY\s+(`[^`]+`|\w+)\s+\(((?:[^()]|\([^)]*\))*)\)/';
@@ -96,7 +96,7 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
         return $sql;
     }
 
-    private function rewrite_numeric_type($sql)
+    private function rewriteNumericType($sql)
     {
         // Numeric types in MySQL which need to be rewritten
         $numeric_types = ["bigint", "int", "integer", "smallint", "mediumint", "tinyint", "double", "decimal"];
@@ -143,7 +143,7 @@ class CreateTableSQLRewriter extends AbstractSQLRewriter
         return $sql;
     }
 
-    private function rewrite_columns_with_protected_names($sql)
+    private function rewriteColumnsWithProtectedNames($sql)
     {
         // Splitting the SQL statement into parts before "(", inside "(", and after ")"
         if (preg_match('/^(CREATE TABLE IF NOT EXISTS|CREATE TABLE|ALTER TABLE)\s+([^\s]+)\s*\((.*)\)(.*)$/is', $sql, $matches)) {
